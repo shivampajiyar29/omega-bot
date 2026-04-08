@@ -1,0 +1,6 @@
+.env
+.env.local
+.env.*.local
+apps/api/.venv/
+apps/web/node_modules/
+apps/web/.next/

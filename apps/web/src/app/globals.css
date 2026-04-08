@@ -1,0 +1,148 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0b0e;
+  --bg1: #111318;
+  --bg2: #16191f;
+  --bg3: #1c2029;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8eaf0;
+  --text2: #8b90a0;
+  --text3: #545870;
+  --green: #00d4a0;
+  --red: #ff4757;
+  --amber: #ffb347;
+  --blue: #4a9eff;
+  --purple: #9b8fff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* Headings use display font */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Syne', sans-serif;
+}
+
+/* Card base */
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+/* Status dots */
+.dot-green  { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; }
+.dot-red    { width: 7px; height: 7px; border-radius: 50%; background: var(--red);   display: inline-block; }
+.dot-amber  { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); display: inline-block; }
+.dot-gray   { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); display: inline-block; }
+
+/* P&L colors */
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+.neu { color: var(--text2); }
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: 'Syne', sans-serif;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-green  { background: rgba(0,212,160,0.1);  color: var(--green); border: 1px solid rgba(0,212,160,0.2); }
+.badge-red    { background: rgba(255,71,87,0.1);  color: var(--red);   border: 1px solid rgba(255,71,87,0.2); }
+.badge-amber  { background: rgba(255,179,71,0.1); color: var(--amber); border: 1px solid rgba(255,179,71,0.2); }
+.badge-blue   { background: rgba(74,158,255,0.1); color: var(--blue);  border: 1px solid rgba(74,158,255,0.2); }
+.badge-purple { background: rgba(155,143,255,0.1);color: var(--purple);border: 1px solid rgba(155,143,255,0.2); }
+
+/* Table */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  font-size: 10px;
+  color: var(--text3);
+  font-family: 'Syne', sans-serif;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.data-table td {
+  padding: 9px 8px;
+  font-size: 12px;
+  color: var(--text2);
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.data-table tr:hover td { background: var(--bg3); }
+.data-table td:first-child { color: var(--text); }
+
+/* Toggle switch */
+.toggle-wrap {
+  position: relative;
+  display: inline-block;
+  width: 32px;
+  height: 18px;
+}
+.toggle-wrap input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0;
+  background: var(--border2);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  top: 3px; left: 3px;
+  background: var(--text3);
+  border-radius: 50%;
+  transition: all 0.2s;
+}
+.toggle-wrap input:checked + .toggle-slider { background: rgba(0,212,160,0.3); }
+.toggle-wrap input:checked + .toggle-slider::after {
+  left: 17px;
+  background: var(--green);
+}
+
+/* Animations */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+@keyframes slide-in-right {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.animate-slide-in { animation: slide-in-right 0.2s ease-out; }
