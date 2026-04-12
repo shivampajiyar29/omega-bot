@@ -100,7 +100,7 @@ async def _run_backtest_task(bt_id: str, strategy_dsl: dict, data: BacktestCreat
     In production this would be a Celery task.
     """
     from app.core.database import AsyncSessionLocal
-    from app.adapters.marketdata.mock_data import MockMarketDataAdapter, OHLCV
+    from app.adapters.marketdata.mock_data import MockMarketDataAdapter
     from app.backtester.engine import BacktestEngine, Bar
     from app.backtester.evaluator import DSLEvaluator
 

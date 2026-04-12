@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import Any, Dict
-import aiohttp
 
 from app.core.database import get_db
 from app.models.models import (
@@ -34,7 +33,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
 
     # Open positions count
     pos_result = await db.execute(
-        select(func.count(Position.id)).where(Position.is_open == True)
+        select(func.count(Position.id)).where(Position.is_open)
     )
     open_positions = pos_result.scalar() or 0
 
@@ -48,16 +47,16 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
 
     # Unread alerts
     alert_result = await db.execute(
-        select(func.count(Alert.id)).where(Alert.is_read == False)
+        select(func.count(Alert.id)).where(not Alert.is_read)
     )
     unread_alerts = alert_result.scalar() or 0
 
     # Recent positions for P&L (mock for now)
     pos_query = await db.execute(
-        select(Position).where(Position.is_open == True).limit(10)
+        select(Position).where(Position.is_open).limit(10)
     )
     positions = pos_query.scalars().all()
-    
+
     total_unrealized_pnl = sum(p.unrealized_pnl or 0.0 for p in positions)
 
     return {
@@ -82,7 +81,7 @@ async def get_market_overview(
     Return market overview data (live or mock).
     In production, this pulls from the active market data connector.
     """
-    result = await db.execute(select(BrokerConnector).where(BrokerConnector.enabled == True))
+    result = await db.execute(select(BrokerConnector).where(BrokerConnector.enabled))
     enabled = {c.name.lower() for c in result.scalars().all()}
 
     has_crypto = "binance" in enabled or not enabled

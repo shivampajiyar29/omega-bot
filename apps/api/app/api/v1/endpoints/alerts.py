@@ -31,7 +31,7 @@ async def list_alerts(
 ):
     q = select(Alert).order_by(Alert.created_at.desc()).limit(limit)
     if unread_only:
-        q = q.where(Alert.is_read == False)
+        q = q.where(not Alert.is_read)
     if level:
         try:
             q = q.where(Alert.level == AlertLevel(level))
@@ -45,7 +45,7 @@ async def list_alerts(
 async def unread_count(db: AsyncSession = Depends(get_db)):
     from sqlalchemy import func
     result = await db.execute(
-        select(func.count(Alert.id)).where(Alert.is_read == False)
+        select(func.count(Alert.id)).where(not Alert.is_read)
     )
     return {"count": result.scalar() or 0}
 
@@ -82,7 +82,7 @@ async def mark_read(alert_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/read-all", response_model=dict)
 async def mark_all_read(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Alert).where(Alert.is_read == False))
+    result = await db.execute(select(Alert).where(not Alert.is_read))
     count = 0
     for a in result.scalars().all():
         a.is_read = True

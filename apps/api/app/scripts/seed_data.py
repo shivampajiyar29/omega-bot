@@ -7,7 +7,6 @@ Or via: make seed
 import asyncio
 import logging
 import uuid
-from datetime import datetime
 
 from sqlalchemy import select
 
@@ -20,7 +19,6 @@ async def seed():
     from app.models.models import (
         BrokerConnector, MarketDataConnector, Watchlist, WatchlistSymbol,
         Strategy, EnabledModule, AppSetting, RiskProfile, ConnectorStatus,
-        TradingMode, MarketType,
     )
 
     await init_db()
@@ -77,7 +75,7 @@ async def seed():
                 log.info(f"  + marketdata: {m['display_name']}")
 
         # ── Default Watchlist ─────────────────────────────────────────────────
-        wl = await db.execute(select(Watchlist).where(Watchlist.is_default == True))
+        wl = await db.execute(select(Watchlist).where(Watchlist.is_default))
         if not wl.scalar_one_or_none():
             wl_obj = Watchlist(id=str(uuid.uuid4()), name="My Watchlist", is_default=True)
             db.add(wl_obj)

@@ -11,7 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.services import market_stream
 from app.core.database import AsyncSessionLocal
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc
 from app.models.models import Order, Position, Alert, PortfolioSnapshot
 
 router = APIRouter()

@@ -11,7 +11,7 @@ To add a new broker:
 4. Restart API: make restart-api
 5. Enable via Connectors page in the UI
 """
-from typing import Dict, Type, Optional
+from typing import Dict, Type
 import logging
 
 from app.adapters.broker.mock_broker import MockBrokerAdapter, BaseBrokerAdapter

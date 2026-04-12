@@ -5,9 +5,9 @@ Fully self-contained, no external dependencies beyond stdlib + dataclasses.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 
 # ─── Bar (single OHLCV row) ───────────────────────────────────────────────────

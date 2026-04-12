@@ -4,7 +4,7 @@ Risk Guard — pre-execution risk validation.
 from __future__ import annotations
 import logging
 from datetime import datetime, date
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 

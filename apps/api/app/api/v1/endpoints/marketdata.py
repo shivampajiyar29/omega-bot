@@ -7,7 +7,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import logging
 
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query
 
 router = APIRouter()
 log = logging.getLogger(__name__)

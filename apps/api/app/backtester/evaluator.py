@@ -4,9 +4,8 @@ Works with the BacktestEngine.
 """
 from __future__ import annotations
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from app.backtester.engine import Bar
@@ -109,12 +108,18 @@ def _eval_condition(cond: Dict, computed: Dict[str, pd.Series], i: int) -> bool:
     if left is None or right is None:
         return False
 
-    if op == "gt":   return left > right
-    if op == "gte":  return left >= right
-    if op == "lt":   return left < right
-    if op == "lte":  return left <= right
-    if op == "eq":   return abs(left - right) < 1e-9
-    if op == "neq":  return abs(left - right) >= 1e-9
+    if op == "gt":
+        return left > right
+    if op == "gte":
+        return left >= right
+    if op == "lt":
+        return left < right
+    if op == "lte":
+        return left <= right
+    if op == "eq":
+        return abs(left - right) < 1e-9
+    if op == "neq":
+        return abs(left - right) >= 1e-9
 
     # Crossover operators need previous bar
     if i < 1:

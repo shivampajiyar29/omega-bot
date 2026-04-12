@@ -145,7 +145,7 @@ Respond with ONLY the JSON strategy object. No markdown, no code blocks, no expl
         strategy_dict = json.loads(raw)
 
         # Validate through DSL schema
-        validated = StrategyDSL(**strategy_dict)
+        StrategyDSL(**strategy_dict)
 
         return {
             "strategy": strategy_dict,

@@ -1,8 +1,8 @@
 """
 Watchlist API — symbol watchlist management.
 """
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -22,7 +22,7 @@ class SymbolAdd(BaseModel):
 
 @router.get("/", response_model=dict)
 async def get_default_watchlist(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Watchlist).where(Watchlist.is_default == True).limit(1))
+    result = await db.execute(select(Watchlist).where(Watchlist.is_default).limit(1))
     wl = result.scalar_one_or_none()
 
     if not wl:
@@ -64,7 +64,7 @@ async def list_watchlists(db: AsyncSession = Depends(get_db)):
 @router.post("/symbols", response_model=dict, status_code=201)
 async def add_symbol(data: SymbolAdd, db: AsyncSession = Depends(get_db)):
     # Ensure default watchlist exists
-    result = await db.execute(select(Watchlist).where(Watchlist.is_default == True).limit(1))
+    result = await db.execute(select(Watchlist).where(Watchlist.is_default).limit(1))
     wl = result.scalar_one_or_none()
     if not wl:
         wl = Watchlist(id=str(uuid.uuid4()), name="My Watchlist", is_default=True)

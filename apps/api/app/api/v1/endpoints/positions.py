@@ -1,15 +1,14 @@
 """
 Positions API — open and closed position tracking.
 """
-from typing import List, Optional
+from typing import List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
 
 from app.core.database import get_db
-from app.models.models import Position, OrderSide
+from app.models.models import Position
 
 router = APIRouter()
 
@@ -22,7 +21,7 @@ async def list_positions(
 ):
     q = select(Position).order_by(Position.opened_at.desc())
     if open_only:
-        q = q.where(Position.is_open == True)
+        q = q.where(Position.is_open)
     result = await db.execute(q)
     return [_p(p) for p in result.scalars().all()]
 
@@ -56,7 +55,7 @@ async def close_position(position_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/summary/pnl", response_model=dict)
 async def get_pnl_summary(db: AsyncSession = Depends(get_db)):
     """Aggregate P&L across all open positions."""
-    result = await db.execute(select(Position).where(Position.is_open == True))
+    result = await db.execute(select(Position).where(Position.is_open))
     positions = result.scalars().all()
 
     unrealized = sum(p.unrealized_pnl or 0.0 for p in positions)

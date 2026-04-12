@@ -12,7 +12,7 @@ import asyncio
 import math
 import random
 from datetime import datetime, timedelta
-from typing import AsyncIterator, Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass
 import logging
 
@@ -35,7 +35,7 @@ class MockMarketDataAdapter:
     """
     Generates synthetic realistic price data using Geometric Brownian Motion.
     Produces live ticks and historical OHLCV bars.
-    
+
     Implements the standard MarketDataAdapter interface.
     """
 
@@ -49,7 +49,7 @@ class MockMarketDataAdapter:
         self._current_prices: Dict[str, float] = {}
         self._running = False
         self._tasks: List[asyncio.Task] = []
-        
+
         # Default seed prices for common symbols
         self._seed_prices = {
             "RELIANCE": 2847.30,
@@ -96,10 +96,10 @@ class MockMarketDataAdapter:
         interval_minutes = self._timeframe_to_minutes(timeframe)
         current_dt = start
         seed_price = self._seed_prices.get(symbol, 1000.0)
-        
+
         # Use symbol hash as random seed for reproducibility
         rng = random.Random(hash(symbol) % (2**32))
-        
+
         price = seed_price
         drift = 0.0001     # Small upward drift
         volatility = self._get_volatility(symbol)

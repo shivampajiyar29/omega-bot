@@ -1,8 +1,8 @@
 """
 Portfolio API — portfolio analytics, equity curve, and snapshots.
 """
-from typing import List, Optional
-from datetime import datetime, timedelta, date
+from typing import List
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -16,7 +16,7 @@ router = APIRouter()
 @router.get("/summary", response_model=dict)
 async def get_portfolio_summary(db: AsyncSession = Depends(get_db)):
     """Return current portfolio summary (positions + cash)."""
-    result = await db.execute(select(Position).where(Position.is_open == True))
+    result = await db.execute(select(Position).where(Position.is_open))
     positions = result.scalars().all()
 
     positions_value = sum((p.current_price or p.avg_price) * p.quantity for p in positions)
@@ -67,7 +67,7 @@ async def get_equity_curve(
         ]
 
     # Generate synthetic equity curve for display
-    import random, math
+    import random
     points = min(days, 365)
     val = 1_000_000.0
     curve = []
@@ -81,7 +81,7 @@ async def get_equity_curve(
 @router.get("/allocation", response_model=List[dict])
 async def get_allocation(db: AsyncSession = Depends(get_db)):
     """Return portfolio allocation by market type."""
-    result = await db.execute(select(Position).where(Position.is_open == True))
+    result = await db.execute(select(Position).where(Position.is_open))
     positions = result.scalars().all()
 
     by_type: dict = {}

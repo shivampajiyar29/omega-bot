@@ -3,7 +3,7 @@ Risk Management API — configure and monitor risk controls.
 """
 from datetime import datetime, date
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
@@ -31,7 +31,7 @@ class RiskProfileCreate(BaseModel):
 @router.get("/profile", response_model=dict)
 async def get_active_risk_profile(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(RiskProfile).where(RiskProfile.is_active == True).limit(1)
+        select(RiskProfile).where(RiskProfile.is_active).limit(1)
     )
     profile = result.scalar_one_or_none()
     if not profile:
@@ -92,7 +92,7 @@ async def get_risk_dashboard(db: AsyncSession = Depends(get_db)):
 
     # Open positions count
     pos_result = await db.execute(
-        select(func.count(Position.id)).where(Position.is_open == True)
+        select(func.count(Position.id)).where(Position.is_open)
     )
     open_pos = pos_result.scalar() or 0
 

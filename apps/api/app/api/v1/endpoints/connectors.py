@@ -9,7 +9,7 @@ from pydantic import BaseModel
 import uuid
 
 from app.core.database import get_db
-from app.models.models import BrokerConnector, MarketDataConnector, ConnectorStatus, TradingMode
+from app.models.models import BrokerConnector, MarketDataConnector, ConnectorStatus
 from app.connectors.registry import list_brokers, list_marketdata_adapters, get_broker_adapter
 
 router = APIRouter()
@@ -90,7 +90,7 @@ async def disable_broker(name: str, db: AsyncSession = Depends(get_db)):
 async def set_default_broker(name: str, db: AsyncSession = Depends(get_db)):
     """Set a connector as the active default broker."""
     # Clear existing default
-    result = await db.execute(select(BrokerConnector).where(BrokerConnector.is_default == True))
+    result = await db.execute(select(BrokerConnector).where(BrokerConnector.is_default))
     for c in result.scalars().all():
         c.is_default = False
 

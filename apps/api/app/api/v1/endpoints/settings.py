@@ -1,7 +1,7 @@
 """
 Settings API — global application settings key/value store.
 """
-from typing import Any, Dict, List
+from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from binance import AsyncClient as BinanceAsyncClient
-    from binance.exceptions import BinanceAPIException
+    from binance.exceptions import BinanceAPIException  # noqa: F401
     HAS_BINANCE = True
 except ImportError:
     HAS_BINANCE = False

@@ -5,7 +5,7 @@ Each returns appropriate mock/empty data so the frontend works.
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional
+from typing import Optional
 from pydantic import BaseModel
 import uuid
 from datetime import datetime
@@ -45,7 +45,7 @@ positions = APIRouter()
 async def list_positions(open_only: bool = True, db: AsyncSession = Depends(get_db)):
     q = select(Position)
     if open_only:
-        q = q.where(Position.is_open == True)
+        q = q.where(Position.is_open)
     result = await db.execute(q.order_by(Position.opened_at.desc()))
     return [_pos(p) for p in result.scalars().all()]
 
@@ -60,7 +60,7 @@ alerts = APIRouter()
 async def list_alerts(unread_only: bool = False, limit: int = 50, db: AsyncSession = Depends(get_db)):
     q = select(Alert).order_by(Alert.created_at.desc()).limit(limit)
     if unread_only:
-        q = q.where(Alert.is_read == False)
+        q = q.where(not Alert.is_read)
     result = await db.execute(q)
     return [{"id": a.id, "title": a.title, "message": a.message, "level": a.level, "is_read": a.is_read, "created_at": a.created_at.isoformat()} for a in result.scalars().all()]
 
@@ -74,7 +74,7 @@ async def mark_read(alert_id: str, db: AsyncSession = Depends(get_db)):
 
 @alerts.post("/read-all")
 async def mark_all_read(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Alert).where(Alert.is_read == False))
+    result = await db.execute(select(Alert).where(not Alert.is_read))
     for a in result.scalars().all():
         a.is_read = True
     await db.commit()
@@ -87,7 +87,7 @@ logs = APIRouter()
 @logs.get("/")
 async def list_logs(limit: int = 100, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AuditLog).order_by(AuditLog.logged_at.desc()).limit(limit))
-    return [{"id": l.id, "action": l.action, "entity_type": l.entity_type, "entity_id": l.entity_id, "details": l.details, "logged_at": l.logged_at.isoformat()} for l in result.scalars().all()]
+    return [{"id": entry.id, "action": entry.action, "entity_type": entry.entity_type, "entity_id": entry.entity_id, "details": entry.details, "logged_at": entry.logged_at.isoformat() if entry.logged_at else None} for entry in result.scalars().all()]
 
 
 # ── Modules ───────────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ watchlist_router = APIRouter()
 
 @watchlist_router.get("/")
 async def get_watchlist(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Watchlist).where(Watchlist.is_default == True).limit(1))
+    result = await db.execute(select(Watchlist).where(Watchlist.is_default).limit(1))
     wl = result.scalar_one_or_none()
     if not wl:
         # Return mock data
@@ -192,7 +192,7 @@ class AddSymbol(BaseModel):
 
 @watchlist_router.post("/symbols")
 async def add_symbol(data: AddSymbol, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Watchlist).where(Watchlist.is_default == True).limit(1))
+    result = await db.execute(select(Watchlist).where(Watchlist.is_default).limit(1))
     wl = result.scalar_one_or_none()
     if not wl:
         wl = Watchlist(id=str(uuid.uuid4()), name="My Watchlist", is_default=True)
@@ -280,7 +280,7 @@ async def get_portfolio_summary():
 
 @portfolio_router.get("/equity-curve")
 async def get_equity_curve(period: str = "1m"):
-    import random, math
+    import random
     points = 30 if period == "1m" else (7 if period == "1w" else 365)
     val = 300_000.0
     curve = []

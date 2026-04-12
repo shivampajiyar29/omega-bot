@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import upstox_client
-    from upstox_client.rest import ApiException
+    from upstox_client.rest import ApiException  # noqa: F401
     HAS_UPSTOX = True
 except ImportError:
     HAS_UPSTOX = False

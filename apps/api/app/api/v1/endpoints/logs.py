@@ -35,7 +35,7 @@ async def list_logs(
     if entity_type:
         q = q.where(AuditLog.entity_type == entity_type)
     result = await db.execute(q)
-    return [_l(l) for l in result.scalars().all()]
+    return [_l(log_entry) for log_entry in result.scalars().all()]
 
 
 @router.post("/", response_model=dict, status_code=201)
@@ -68,13 +68,13 @@ async def clear_old_logs(days_old: int = 30, db: AsyncSession = Depends(get_db))
     return {"deleted": count, "cutoff_days": days_old}
 
 
-def _l(l: AuditLog) -> dict:
+def _l(log_entry: AuditLog) -> dict:
     return {
-        "id":          l.id,
-        "action":      l.action,
-        "entity_type": l.entity_type,
-        "entity_id":   l.entity_id,
-        "details":     l.details,
-        "ip_address":  l.ip_address,
-        "logged_at":   l.logged_at.isoformat() if l.logged_at else None,
+        "id":          log_entry.id,
+        "action":      log_entry.action,
+        "entity_type": log_entry.entity_type,
+        "entity_id":   log_entry.entity_id,
+        "details":     log_entry.details,
+        "ip_address":  log_entry.ip_address,
+        "logged_at":   log_entry.logged_at.isoformat() if log_entry.logged_at else None,
     }

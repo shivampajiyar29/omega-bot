@@ -47,7 +47,7 @@ class MockBrokerAdapter:
     """
     Simulated broker for paper trading.
     Fills market orders instantly; limit orders fill when price is touched.
-    
+
     Implements the standard BrokerAdapter interface so it can be
     swapped out for any real broker adapter.
     """
@@ -130,7 +130,7 @@ class MockBrokerAdapter:
         if order_type == "market":
             await asyncio.sleep(self.fill_delay_ms / 1000)
             await self._fill_order(order)
-        
+
         return order
 
     async def cancel_order(self, order_id: str) -> bool:
@@ -188,7 +188,7 @@ class MockBrokerAdapter:
         """Execute a fill at market price with slippage applied."""
         market_price = self._market_prices.get(order.symbol, order.price or 100.0)
         slippage = market_price * (self.slippage_pct / 100)
-        
+
         if order.side == "buy":
             fill_price = market_price + slippage
         else:
@@ -275,7 +275,7 @@ class BaseBrokerAdapter:
     """
     Abstract interface that all broker adapters must implement.
     Create a new adapter by subclassing this.
-    
+
     Naming convention: {BrokerName}BrokerAdapter
     Example: ZerodhaBrokerAdapter, AlpacaBrokerAdapter
     """

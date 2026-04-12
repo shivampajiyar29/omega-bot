@@ -2,7 +2,6 @@
 Execution Engine — routes signals to broker adapters with risk checks.
 """
 from __future__ import annotations
-import asyncio
 import logging
 from typing import Any, Dict, Optional
 

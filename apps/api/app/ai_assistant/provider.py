@@ -12,7 +12,7 @@ Supports:
 from __future__ import annotations
 import json
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 
 from app.core.config import settings
 
@@ -221,7 +221,7 @@ Respond ONLY with valid JSON, no markdown, no explanation."""
 
     # Validate through DSL schema
     from app.strategy.dsl import StrategyDSL
-    validated = StrategyDSL(**dsl)
+    StrategyDSL(**dsl)
 
     return {"strategy": dsl, "valid": True, "provider": settings.AI_PROVIDER}
 

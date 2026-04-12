@@ -1,7 +1,7 @@
 """Screener API — multi-symbol signal scanner."""
 import asyncio
 import logging
-from typing import List, Optional
+from typing import Optional
 from fastapi import APIRouter, Query
 
 log = logging.getLogger(__name__)
@@ -33,7 +33,8 @@ async def _scan_one(symbol: str, exchange: str, timeframe: str) -> dict:
         # Technical fallback
         if len(bars) >= 21:
             closes = [b.close for b in bars]
-            ema9  = closes[-1]; ema21 = sum(closes[-21:]) / 21
+            ema9 = closes[-1]
+            ema21 = sum(closes[-21:]) / 21
             chg = (closes[-1] - closes[-14]) / closes[-14] * 100
             if ema9 > ema21 and chg > 0:
                 return {"symbol": symbol, "exchange": exchange, "signal": "BUY",

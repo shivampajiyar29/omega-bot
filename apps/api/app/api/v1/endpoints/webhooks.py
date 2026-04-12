@@ -1,8 +1,6 @@
 """
 Webhooks API — receive external signals (TradingView, custom).
 """
-import hmac
-import hashlib
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request

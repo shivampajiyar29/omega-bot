@@ -7,12 +7,18 @@ router = APIRouter()
 
 
 class OHLCVItem(BaseModel):
-    open: float; high: float; low: float; close: float; volume: float
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
     time: Optional[str] = None
 
 
 class AISignalRequest(BaseModel):
-    symbol: str; exchange: str = "NSE"; timeframe: str = "15m"
+    symbol: str
+    exchange: str = "NSE"
+    timeframe: str = "15m"
     data: Optional[List[OHLCVItem]] = None
 
 
@@ -42,14 +48,23 @@ async def predict_signal(req: AISignalRequest):
 
     result = await get_ai_signal(req.symbol, ohlcv, req.exchange, req.timeframe)
     if result is None:
-        return {"symbol": req.symbol, "signal": "HOLD", "confidence": 0.0,
-                "agreement": False, "available": False,
-                "message": "AI Engine not running. Start: docker compose --profile ai up ai_engine"}
+        return {
+            "symbol": req.symbol,
+            "signal": "HOLD",
+            "confidence": 0.0,
+            "agreement": False,
+            "available": False,
+            "message": "AI Engine not running. Start: docker compose --profile ai up ai_engine",
+        }
     return {**result, "available": True}
 
 
 @router.get("/quick/{symbol}")
-async def quick_signal(symbol: str, exchange: str = Query("NSE"), timeframe: str = Query("15m")):
+async def quick_signal(
+    symbol: str,
+    exchange: str = Query("NSE"),
+    timeframe: str = Query("15m"),
+):
     from app.services.ai_engine_client import get_ai_signal
     from app.adapters.marketdata.mock_data import MockMarketDataAdapter
     from datetime import datetime, timedelta

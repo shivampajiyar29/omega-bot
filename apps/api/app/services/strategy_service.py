@@ -115,7 +115,7 @@ class StrategyService:
     async def list_all(self, active_only: bool = False) -> List[Strategy]:
         q = select(Strategy).order_by(Strategy.updated_at.desc())
         if active_only:
-            q = q.where(Strategy.is_active == True)
+            q = q.where(Strategy.is_active)
         result = await self.db.execute(q)
         return result.scalars().all()
 

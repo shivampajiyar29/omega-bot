@@ -5,12 +5,10 @@ Indicators are stored in MongoDB, validated for safety, and cached in Redis.
 """
 from __future__ import annotations
 import ast
-import hashlib
 import textwrap
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-import uuid
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +227,7 @@ def validate_indicator_code(code: str) -> bool:
 
 # ─── Executor ─────────────────────────────────────────────────────────────────
 
-def execute_custom_indicator(code: str, df, params: Dict = None) -> "pd.Series":
+def execute_custom_indicator(code: str, df, params: Dict = None):
     """
     Safely execute a custom indicator function.
     Returns a pd.Series aligned to df index.

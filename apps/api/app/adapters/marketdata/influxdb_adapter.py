@@ -10,10 +10,9 @@ Measurement schema:
   time: timestamp (nanoseconds)
 """
 from __future__ import annotations
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List
 
 from app.adapters.marketdata.mock_data import OHLCV
 from app.core.config import settings
@@ -21,8 +20,8 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 try:
-    from influxdb_client import InfluxDBClient, WriteOptions
-    from influxdb_client.client.write_api import SYNCHRONOUS
+    from influxdb_client import InfluxDBClient, WriteOptions  # noqa: F401
+    from influxdb_client.client.write_api import SYNCHRONOUS  # noqa: F401
     from influxdb_client.client.influxdb_client_async import InfluxDBClientAsync
     HAS_INFLUX = True
 except ImportError:
@@ -98,7 +97,7 @@ class InfluxDBMarketDataAdapter:
         if not self._connected or not self._client:
             return
 
-        from influxdb_client import Point
+        from influxdb_client import Point  # noqa: F401
         from influxdb_client.domain.write_precision import WritePrecision
 
         points = []
