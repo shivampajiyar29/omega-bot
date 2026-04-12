@@ -1,6 +1,66 @@
+# Environment
 .env
 .env.local
 .env.*.local
-apps/api/.venv/
-apps/web/node_modules/
-apps/web/.next/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Databases — never commit these
+*.db
+*.sqlite
+*.sqlite3
+omegabot.db
+omegabot_dev.db
+test_*.db
+
+# Node
+node_modules/
+.next/
+.turbo/
+out/
+
+# ML models — large binary files
+ai_engine/models/saved/*.json
+ai_engine/models/saved/*.pkl
+ai_engine/models/saved/*.keras
+ai_engine/models/saved/*.h5
+
+# Docker
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+.codex-logs/
+
+# Test artifacts
+test_*.db
+e2e_*.db
+
+# Python cache (never commit these)
+__pycache__/
+*.py[cod]
+*.pyo

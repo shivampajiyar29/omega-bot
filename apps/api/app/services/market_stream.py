@@ -164,3 +164,19 @@ async def start_market_stream() -> None:
         except Exception:
             logger.exception("market stream tick failed")
         await asyncio.sleep(1.5)
+
+
+def get_price_from_redis(symbol: str) -> float:
+    """Get last price from Redis; return 0.0 if unavailable."""
+    try:
+        import redis as _redis
+        from app.core.config import settings
+        r = _redis.from_url(settings.REDIS_URL, decode_responses=True)
+        val = r.hget(TICK_HASH, symbol.upper())
+        if val:
+            import json
+            d = json.loads(val)
+            return float(d.get("price", 0.0))
+    except Exception:
+        pass
+    return 0.0

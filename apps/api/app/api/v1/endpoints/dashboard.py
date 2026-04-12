@@ -109,26 +109,40 @@ async def get_market_overview(
 
 
 async def _get_crypto_market_cards() -> list[dict]:
+    """Fetch crypto cards from Binance; fall back to mock prices on failure."""
     pairs = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
-        async with s.get("https://api.binance.com/api/v3/ticker/24hr") as r:
-            if r.status >= 400:
-                return []
-            data = await r.json()
-    by_symbol = {x.get("symbol"): x for x in data if x.get("symbol") in pairs}
-    cards = []
-    for p in pairs:
-        d = by_symbol.get(p)
-        if not d:
-            continue
-        cards.append(
-            {
-                "sym": p,
-                "price": float(d.get("lastPrice", 0.0)),
-                "chg": float(d.get("priceChange", 0.0)),
-                "pct": float(d.get("priceChangePercent", 0.0)),
-                "market": "crypto",
-                "source": "binance",
-            }
-        )
-    return cards
+    MOCK_PRICES = {
+        "BTCUSDT": (87432.0, 1975.5, 2.31),
+        "ETHUSDT": (3221.4,  59.2,   1.87),
+        "BNBUSDT": (612.3,   8.1,    1.34),
+        "SOLUSDT": (183.5,  -2.1,   -1.13),
+        "XRPUSDT": (0.624,   0.012,  1.96),
+    }
+    try:
+        import aiohttp as _aiohttp
+        async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=5)) as s:
+            async with s.get("https://api.binance.com/api/v3/ticker/24hr") as r:
+                if r.status < 400:
+                    data = await r.json()
+                    by_symbol = {x.get("symbol"): x for x in data if x.get("symbol") in pairs}
+                    cards = []
+                    for p in pairs:
+                        d = by_symbol.get(p)
+                        if d:
+                            cards.append({
+                                "sym": p, "market": "crypto", "source": "binance",
+                                "price": float(d.get("lastPrice", 0.0)),
+                                "chg":   float(d.get("priceChange", 0.0)),
+                                "pct":   float(d.get("priceChangePercent", 0.0)),
+                            })
+                    if cards:
+                        return cards
+    except Exception:
+        pass
+
+    # Mock fallback
+    return [
+        {"sym": p, "market": "crypto", "source": "mock",
+         "price": MOCK_PRICES[p][0], "chg": MOCK_PRICES[p][1], "pct": MOCK_PRICES[p][2]}
+        for p in pairs
+    ]

@@ -1,160 +1,141 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useStore } from "@/store/useStore";
 import {
   LayoutDashboard, LineChart, Eye, Braces, RefreshCcw,
   FileText, Zap, ClipboardList, Briefcase, Shield, BookOpen,
-  Bell, Plug, Bot, Settings, Layers, ChevronRight,
+  Bell, Plug, Bot, Layers, Settings, Search, NotebookPen,
+  BarChart3, Activity,
 } from "lucide-react";
 
 const NAV = [
   {
-    section: "Core",
+    group: "Trading",
     items: [
-      { label: "Dashboard",       href: "/",             icon: LayoutDashboard },
-      { label: "Charts",          href: "/charts",       icon: LineChart },
-      { label: "Watchlist",       href: "/watchlist",    icon: Eye },
-      { label: "Strategy Builder",href: "/strategy",     icon: Braces },
+      { href: "/",          label: "Dashboard",      icon: LayoutDashboard },
+      { href: "/charts",    label: "Charts",         icon: LineChart },
+      { href: "/watchlist", label: "Watchlist",      icon: Eye },
+      { href: "/paper",     label: "Paper Trading",  icon: FileText },
+      { href: "/live",      label: "Live Trading",   icon: Zap },
+      { href: "/orders",    label: "Orders",         icon: ClipboardList },
+      { href: "/positions", label: "Positions",      icon: Briefcase },
     ],
   },
   {
-    section: "Trading",
+    group: "Strategy & AI",
     items: [
-      { label: "Backtester",      href: "/backtest",     icon: RefreshCcw },
-      { label: "Paper Trading",   href: "/paper",        icon: FileText },
-      { label: "Live Trading",    href: "/live",         icon: Zap },
-      { label: "Orders",          href: "/orders",       icon: ClipboardList },
-      { label: "Positions",       href: "/positions",    icon: Briefcase },
+      { href: "/strategy",   label: "Builder",       icon: Braces },
+      { href: "/backtest",   label: "Backtester",    icon: RefreshCcw },
+      { href: "/screener",   label: "Screener",      icon: Search },
+      { href: "/indicators", label: "Indicators",    icon: Activity },
+      { href: "/ai",         label: "AI Assistant",  icon: Bot },
     ],
   },
   {
-    section: "Analytics",
+    group: "Portfolio",
     items: [
-      { label: "Portfolio",       href: "/portfolio",    icon: Briefcase },
-      { label: "Risk Center",     href: "/risk",         icon: Shield },
-      { label: "Logs & Audit",    href: "/logs",         icon: BookOpen },
-      { label: "Alerts",          href: "/alerts",       icon: Bell },
+      { href: "/portfolio",  label: "Portfolio",     icon: BarChart3 },
+      { href: "/risk",       label: "Risk Center",   icon: Shield },
+      { href: "/journal",    label: "Trade Journal", icon: NotebookPen },
     ],
   },
   {
-    section: "System",
+    group: "System",
     items: [
-      { label: "Connectors",      href: "/connectors",   icon: Plug },
-      { label: "AI Assistant",    href: "/ai",           icon: Bot },
-      { label: "Module Manager",  href: "/modules",      icon: Layers },
-      { label: "Settings",        href: "/settings",     icon: Settings },
+      { href: "/connectors", label: "Connectors",   icon: Plug },
+      { href: "/alerts",     label: "Alerts",       icon: Bell },
+      { href: "/logs",       label: "Logs & Audit", icon: BookOpen },
+      { href: "/modules",    label: "Modules",      icon: Layers },
+      { href: "/settings",   label: "Settings",     icon: Settings },
     ],
   },
 ];
 
 export function Sidebar() {
-  const [expanded, setExpanded] = useState(false);
   const pathname = usePathname();
+  const { tradingMode } = useStore();
+  const isLive = tradingMode === "live";
 
   return (
-    <aside
-      style={{
-        width: expanded ? 204 : 56,
-        background: "var(--bg1)",
-        borderRight: "1px solid var(--border)",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: expanded ? "flex-start" : "center",
-        padding: "14px 0",
-        flexShrink: 0,
-        transition: "width 0.22s cubic-bezier(.4,0,.2,1)",
-        overflowX: "hidden",
-        overflowY: "auto",
-        position: "relative",
-        zIndex: 40,
-      }}
-    >
+    <aside style={{
+      width: 220, flexShrink: 0,
+      background: "var(--bg1)",
+      borderRight: "1px solid var(--border)",
+      display: "flex", flexDirection: "column",
+      height: "100vh", position: "sticky", top: 0,
+      overflowY: "auto",
+    }}>
       {/* Logo */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          width: 34, height: 34,
-          borderRadius: 8,
-          background: "linear-gradient(135deg, #4a9eff, #9b8fff)",
+      <div style={{
+        padding: "18px 16px 14px",
+        borderBottom: "1px solid var(--border)",
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 8,
+          background: "linear-gradient(135deg, #4a9eff 0%, #9b8fff 100%)",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 15,
-          color: "#fff", border: "none", cursor: "pointer",
-          margin: expanded ? "0 0 18px 12px" : "0 0 18px 0",
-          flexShrink: 0,
-        }}
-      >
-        Ω
-      </button>
-
-      {/* Nav groups */}
-      {NAV.map((group) => (
-        <div key={group.section} style={{ width: "100%", marginTop: 8 }}>
-          {expanded && (
-            <div
-              style={{
-                fontSize: 9, textTransform: "uppercase", letterSpacing: "1.5px",
-                color: "var(--text3)", fontFamily: "Syne, sans-serif",
-                padding: "2px 12px 6px", fontWeight: 500,
-              }}
-            >
-              {group.section}
-            </div>
-          )}
-          {group.items.map((item) => {
-            const active = pathname === item.href;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: expanded ? "9px 12px" : "9px 0",
-                  justifyContent: expanded ? "flex-start" : "center",
-                  borderRadius: 6,
-                  margin: expanded ? "1px 6px" : "1px auto",
-                  width: expanded ? "calc(100% - 12px)" : 38,
-                  color: active ? "var(--blue)" : "var(--text2)",
-                  background: active ? "rgba(74,158,255,0.1)" : "transparent",
-                  textDecoration: "none",
-                  transition: "all 0.12s",
-                  fontFamily: "Syne, sans-serif",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                }}
-                title={!expanded ? item.label : undefined}
-              >
-                <Icon size={16} style={{ flexShrink: 0 }} />
-                {expanded && <span>{item.label}</span>}
-              </Link>
-            );
-          })}
+          fontSize: 16, fontWeight: 800, color: "#fff",
+          fontFamily: "Syne, sans-serif", flexShrink: 0,
+        }}>Ω</div>
+        <div>
+          <div style={{ fontFamily: "Syne, sans-serif", fontWeight: 800, fontSize: 15 }}>
+            OmegaBot
+          </div>
+          <div style={{
+            fontSize: 9, fontFamily: "Syne, sans-serif", fontWeight: 600,
+            letterSpacing: "1.5px", textTransform: "uppercase",
+            color: isLive ? "var(--red)" : "var(--amber)",
+          }}>
+            {isLive ? "● LIVE" : "● PAPER"}
+          </div>
         </div>
-      ))}
+      </div>
 
-      {/* Expand toggle at bottom */}
-      <div style={{ flex: 1 }} />
-      <button
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "center",
-          width: 28, height: 28, borderRadius: 6,
-          background: "transparent", border: "1px solid var(--border)",
-          color: "var(--text3)", cursor: "pointer",
-          margin: expanded ? "4px 0 0 12px" : "4px 0 0 0",
-          transition: "all 0.2s",
-        }}
-      >
-        <ChevronRight
-          size={14}
-          style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}
-        />
-      </button>
+      {/* Nav */}
+      <nav style={{ flex: 1, padding: "10px 0" }}>
+        {NAV.map(section => (
+          <div key={section.group} style={{ marginBottom: 4 }}>
+            <div style={{
+              fontSize: 9, color: "var(--text3)",
+              fontFamily: "Syne, sans-serif", fontWeight: 600,
+              letterSpacing: "1.4px", textTransform: "uppercase",
+              padding: "6px 16px 3px",
+            }}>{section.group}</div>
+            {section.items.map(item => {
+              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const Icon = item.icon;
+              return (
+                <Link key={item.href} href={item.href} style={{
+                  display: "flex", alignItems: "center", gap: 9,
+                  padding: "6px 16px",
+                  textDecoration: "none",
+                  borderRadius: "0 8px 8px 0",
+                  marginRight: 8, marginBottom: 1,
+                  background: active ? "rgba(74,158,255,0.1)" : "transparent",
+                  borderLeft: active ? "2px solid var(--blue)" : "2px solid transparent",
+                  color: active ? "var(--blue)" : "var(--text3)",
+                  fontSize: 12,
+                  fontFamily: "Syne, sans-serif",
+                  fontWeight: active ? 600 : 400,
+                  transition: "all 0.1s",
+                }}>
+                  <Icon size={14} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+
+      <div style={{
+        padding: "8px 16px",
+        borderTop: "1px solid var(--border)",
+        fontSize: 9, color: "var(--text3)",
+        fontFamily: "IBM Plex Mono, monospace",
+      }}>v1.0.0 · Personal use</div>
     </aside>
   );
 }
