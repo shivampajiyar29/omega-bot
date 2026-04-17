@@ -1,16 +1,16 @@
 """
-Dashboard API — aggregated data for the home dashboard.
-Returns all data needed to render the main screen in one request.
+Dashboard API — real aggregated data from DB + live prices.
 """
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from __future__ import annotations
+from datetime import datetime, date
 from typing import Any, Dict
 
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
-from app.models.models import (
-    Bot, Order, Position, Alert, BotStatus, BrokerConnector
-)
+from app.models.models import Bot, Order, Position, Alert, BotStatus, PortfolioSnapshot
 
 router = APIRouter()
 
@@ -18,57 +18,80 @@ router = APIRouter()
 @router.get("/summary", response_model=Dict[str, Any])
 async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     """
-    Return aggregated dashboard stats:
-    - P&L summary
-    - Active bots count
-    - Open positions
-    - Recent alerts
-    - Portfolio value
+    Real-time dashboard summary from DB + live Redis prices.
     """
-    # Active bots
-    bot_result = await db.execute(
-        select(func.count(Bot.id)).where(Bot.status == BotStatus.RUNNING)
-    )
-    active_bots = bot_result.scalar() or 0
+    from app.services.market_stream import get_latest_price
 
-    # Open positions count
-    pos_result = await db.execute(
-        select(func.count(Position.id)).where(Position.is_open)
-    )
-    open_positions = pos_result.scalar() or 0
+    # Active bots
+    active_bots = (await db.execute(
+        select(func.count(Bot.id)).where(Bot.status == BotStatus.RUNNING)
+    )).scalar() or 0
+
+    # Open positions with live prices
+    positions = (await db.execute(
+        select(Position).where(Position.is_open)
+    )).scalars().all()
+
+    total_unrealized = 0.0
+    positions_value  = 0.0
+    for p in positions:
+        tick = get_latest_price(p.symbol)
+        cur  = float(tick["price"]) if tick else float(p.current_price or p.avg_price)
+        p.current_price  = cur
+        p.unrealized_pnl = (cur - float(p.avg_price)) * float(p.quantity)
+        positions_value  += cur * float(p.quantity)
+        total_unrealized += float(p.unrealized_pnl)
+
+    # Commit mark-to-market updates
+    if positions:
+        await db.commit()
 
     # Today's orders
-    from datetime import datetime, date
     today_start = datetime.combine(date.today(), datetime.min.time())
-    order_result = await db.execute(
+    orders_today = (await db.execute(
         select(func.count(Order.id)).where(Order.placed_at >= today_start)
-    )
-    orders_today = order_result.scalar() or 0
+    )).scalar() or 0
 
     # Unread alerts
-    alert_result = await db.execute(
-        select(func.count(Alert.id)).where(not Alert.is_read)
-    )
-    unread_alerts = alert_result.scalar() or 0
+    unread_alerts = (await db.execute(
+        select(func.count(Alert.id)).where(Alert.is_read.is_(False))
+    )).scalar() or 0
 
-    # Recent positions for P&L (mock for now)
-    pos_query = await db.execute(
-        select(Position).where(Position.is_open).limit(10)
-    )
-    positions = pos_query.scalars().all()
+    # Cash from latest portfolio snapshot
+    snap = (await db.execute(
+        select(PortfolioSnapshot).order_by(PortfolioSnapshot.date.desc()).limit(1)
+    )).scalars().first()
+    cash = float(snap.cash) if snap else 1_000_000.0
+    total_pnl = float(snap.total_pnl or 0) if snap else 0.0
 
-    total_unrealized_pnl = sum(p.unrealized_pnl or 0.0 for p in positions)
+    # Realized P&L today from fills
+    from app.models.models import Fill
+    (await db.execute(
+        select(func.sum(Fill.price * Fill.quantity)).where(Fill.filled_at >= today_start)
+    )).scalar() or 0.0
+
+    total_value = cash + positions_value
+
+    # Trading mode from settings
+    from app.models.models import AppSetting
+    mode_row = (await db.execute(
+        select(AppSetting).where(AppSetting.key == "trading_mode")
+    )).scalars().first()
+    trading_mode = mode_row.value if mode_row else "paper"
 
     return {
-        "active_bots": active_bots,
-        "open_positions": open_positions,
-        "orders_today": orders_today,
-        "unread_alerts": unread_alerts,
-        "unrealized_pnl": round(total_unrealized_pnl, 2),
-        "realized_pnl_today": 0.0,  # TODO: compute from fills
-        "total_pnl_today": round(total_unrealized_pnl, 2),
-        "portfolio_value": 1_000_000.0,  # TODO: from portfolio service
-        "trading_mode": "paper",  # TODO: from settings
+        "active_bots":       active_bots,
+        "open_positions":    len(positions),
+        "orders_today":      orders_today,
+        "unread_alerts":     unread_alerts,
+        "unrealized_pnl":    round(total_unrealized, 2),
+        "realized_pnl_today":round(total_pnl, 2),
+        "total_pnl_today":   round(total_unrealized + total_pnl, 2),
+        "portfolio_value":   round(total_value, 2),
+        "cash":              round(cash, 2),
+        "positions_value":   round(positions_value, 2),
+        "trading_mode":      trading_mode,
+        "timestamp":         datetime.utcnow().isoformat(),
     }
 
 
@@ -77,71 +100,47 @@ async def get_market_overview(
     market_scope: str = Query("all", pattern="^(all|indian|crypto|american)$"),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Return market overview data (live or mock).
-    In production, this pulls from the active market data connector.
-    """
-    result = await db.execute(select(BrokerConnector).where(BrokerConnector.enabled))
-    enabled = {c.name.lower() for c in result.scalars().all()}
-
-    has_crypto = "binance" in enabled or not enabled
-    has_indian = any(x in enabled for x in {"groww", "angel_one", "upstox", "zerodha", "dhan"})
-    has_american = any(x in enabled for x in {"alpaca", "ibkr"})
-
-    wants = {
-        "crypto": market_scope in {"all", "crypto"},
-        "indian": market_scope in {"all", "indian"},
-        "american": market_scope in {"all", "american"},
-    }
+    """Real market data from Redis (populated by market_stream)."""
+    from app.services.market_stream import get_latest_price, DEFAULT_SYMBOLS, CRYPTO_SYMBOLS
 
     out = []
-    if wants["crypto"] and has_crypto:
-        out.extend(await _get_crypto_market_cards())
+    scopes = set()
+    if market_scope in ("all", "crypto"):
+        scopes.add("crypto")
+    if market_scope in ("all", "indian"):
+        scopes.add("indian")
 
-    # Keep indian/us empty unless corresponding brokers are enabled/implemented.
-    if wants["indian"] and has_indian:
-        out.extend([])
-    if wants["american"] and has_american:
-        out.extend([])
+    for sym in DEFAULT_SYMBOLS:
+        is_crypto = sym in CRYPTO_SYMBOLS
+        if is_crypto and "crypto" not in scopes:
+            continue
+        if not is_crypto and "indian" not in scopes:
+            continue
 
-    return out
+        tick = get_latest_price(sym)
+        if tick:
+            out.append({
+                "sym":      sym,
+                "price":    tick["price"],
+                "exchange": tick.get("exchange", "MOCK"),
+                "market":   "crypto" if is_crypto else "indian",
+                "source":   "live",
+            })
 
-
-async def _get_crypto_market_cards() -> list[dict]:
-    """Fetch crypto cards from Binance; fall back to mock prices on failure."""
-    pairs = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
-    MOCK_PRICES = {
-        "BTCUSDT": (87432.0, 1975.5, 2.31),
-        "ETHUSDT": (3221.4,  59.2,   1.87),
-        "BNBUSDT": (612.3,   8.1,    1.34),
-        "SOLUSDT": (183.5,  -2.1,   -1.13),
-        "XRPUSDT": (0.624,   0.012,  1.96),
-    }
+    # Add Binance 24h change if possible
     try:
-        import aiohttp as _aiohttp
-        async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=5)) as s:
+        import aiohttp
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as s:
             async with s.get("https://api.binance.com/api/v3/ticker/24hr") as r:
                 if r.status < 400:
-                    data = await r.json()
-                    by_symbol = {x.get("symbol"): x for x in data if x.get("symbol") in pairs}
-                    cards = []
-                    for p in pairs:
-                        d = by_symbol.get(p)
+                    ticker_data = await r.json()
+                    by_sym = {d["symbol"]: d for d in ticker_data}
+                    for item in out:
+                        d = by_sym.get(item["sym"])
                         if d:
-                            cards.append({
-                                "sym": p, "market": "crypto", "source": "binance",
-                                "price": float(d.get("lastPrice", 0.0)),
-                                "chg":   float(d.get("priceChange", 0.0)),
-                                "pct":   float(d.get("priceChangePercent", 0.0)),
-                            })
-                    if cards:
-                        return cards
+                            item["chg"]  = float(d.get("priceChange", 0))
+                            item["pct"]  = float(d.get("priceChangePercent", 0))
     except Exception:
         pass
 
-    # Mock fallback
-    return [
-        {"sym": p, "market": "crypto", "source": "mock",
-         "price": MOCK_PRICES[p][0], "chg": MOCK_PRICES[p][1], "pct": MOCK_PRICES[p][2]}
-        for p in pairs
-    ]
+    return out

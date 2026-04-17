@@ -1,5 +1,10 @@
 """
-Paper trading: instant fills against latest Redis prices using existing Order / Position models.
+Paper Trading Engine
+====================
+* Reads AI signals from Redis (set by market_stream or bot loop)
+* Executes BUY/SELL at latest live price (Binance for crypto, simulated for Indian)
+* Updates Orders, Fills, Positions in PostgreSQL in real time
+* Portfolio P&L is always mark-to-market against live prices
 """
 from __future__ import annotations
 
@@ -16,42 +21,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.models import (
-    ConnectorStatus,
-    Fill,
-    MarketType,
-    Order,
-    OrderSide,
-    OrderStatus,
-    OrderType,
-    Position,
-    TradingMode,
-    BrokerConnector,
+    BrokerConnector, ConnectorStatus, Fill, MarketType,
+    Order, OrderSide, OrderStatus, OrderType,
+    Position, TradingMode,
 )
 from app.services import market_stream
 
 logger = logging.getLogger(__name__)
 
-SIGNAL_KEY = "omegabot:paper:signal:{symbol}"
-LAST_ACTION_KEY = "omegabot:paper:last_action:{symbol}"
-LOCK_KEY = "omegabot:paper:lock:{symbol}"
+AI_SIGNAL_KEY_FMT = "omegabot:paper:signal:{symbol}"
+LAST_ACTION_KEY   = "omegabot:paper:last_action:{symbol}"
+LOCK_KEY          = "omegabot:paper:lock:{symbol}"
 
-DEFAULT_EXCHANGE = "MOCK"
-DEFAULT_QTY = 1.0
+INITIAL_CAPITAL   = 1_000_000.0   # ₹10 lakh paper trading capital
+DEFAULT_QTY_FRAC  = 0.02           # 2% of capital per trade
 
 
-def _redis() -> redis.Redis:
+def _get_redis() -> redis.Redis:
     return redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
 def _market_type(symbol: str) -> MarketType:
     s = symbol.upper()
-    if "BTC" in s or "ETH" in s or s.endswith("USDT"):
+    if s.endswith("USDT") or s.endswith("BUSD") or "BTC" in s or "ETH" in s:
         return MarketType.CRYPTO
     return MarketType.EQUITY
 
 
-async def ensure_paper_connector(session: AsyncSession) -> str:
-    """Return default paper broker id, creating a mock connector if missing."""
+async def _get_or_create_connector(session: AsyncSession) -> str:
     result = await session.execute(
         select(BrokerConnector).where(BrokerConnector.is_default.is_(True)).limit(1)
     )
@@ -67,200 +64,148 @@ async def ensure_paper_connector(session: AsyncSession) -> str:
         return row2.id
 
     c = BrokerConnector(
-        id=str(uuid.uuid4()),
-        name="mock",
-        display_name="Mock Paper",
+        id=str(uuid.uuid4()), name="mock", display_name="Paper Trading",
         adapter_class="app.adapters.broker.mock_broker.MockBrokerAdapter",
-        enabled=True,
-        is_default=True,
-        status=ConnectorStatus.CONNECTED,
-        trading_mode=TradingMode.PAPER,
+        enabled=True, is_default=True, status=ConnectorStatus.CONNECTED,
+        trading_mode=TradingMode.PAPER, market_types=["equity", "crypto"],
     )
     session.add(c)
     await session.flush()
     return c.id
 
 
-async def create_order(
-    session: AsyncSession,
-    connector_id: str,
-    symbol: str,
-    side: str,
-    qty: float,
-    price: float,
-    *,
+async def place_paper_order(
+    symbol: str, side: str, quantity: float, price: float,
     bot_id: Optional[str] = None,
-) -> Order:
-    """Create a pending paper order."""
-    side_e = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
-    o = Order(
-        id=str(uuid.uuid4()),
-        bot_id=bot_id,
-        connector_id=connector_id,
-        broker_order_id=None,
-        symbol=symbol.upper(),
-        exchange=DEFAULT_EXCHANGE,
-        market_type=_market_type(symbol),
-        side=side_e,
-        order_type=OrderType.MARKET,
-        quantity=qty,
-        price=price,
-        status=OrderStatus.PENDING,
-        filled_quantity=0.0,
-        trading_mode=TradingMode.PAPER,
-        tags={"source": "paper_ai", "automated": True},
-    )
-    session.add(o)
-    await session.flush()
-    return o
+) -> Optional[Order]:
+    """
+    Place and immediately fill a paper order.
+    Returns the filled Order or None on error.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            cid  = await _get_or_create_connector(session)
+            side_e = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
+
+            # For SELL: check we have a position
+            if side_e == OrderSide.SELL:
+                res = await session.execute(
+                    select(Position).where(
+                        Position.symbol == symbol.upper(),
+                        Position.is_open.is_(True),
+                        Position.side == OrderSide.BUY,
+                        Position.trading_mode == TradingMode.PAPER,
+                        Position.connector_id == cid,
+                    )
+                )
+                pos = res.scalar_one_or_none()
+                if not pos or float(pos.quantity) < quantity * 0.99:
+                    logger.info("SELL skipped — no long position for %s", symbol)
+                    return None
+
+            order = Order(
+                id=str(uuid.uuid4()), bot_id=bot_id, connector_id=cid,
+                broker_order_id=f"paper-{uuid.uuid4().hex[:8]}",
+                symbol=symbol.upper(), exchange="PAPER" if not symbol.upper().endswith("USDT") else "BINANCE",
+                market_type=_market_type(symbol),
+                side=side_e, order_type=OrderType.MARKET,
+                quantity=quantity, price=price,
+                status=OrderStatus.FILLED,
+                filled_quantity=quantity, avg_fill_price=price,
+                trading_mode=TradingMode.PAPER,
+                tags={"source": "paper_ai", "automated": True},
+                placed_at=datetime.now(timezone.utc),
+            )
+            session.add(order)
+
+            fill = Fill(
+                id=str(uuid.uuid4()), order_id=order.id,
+                quantity=quantity, price=price, commission=0.0,
+                filled_at=datetime.now(timezone.utc),
+            )
+            session.add(fill)
+
+            await _update_position(session, order, price, quantity, cid)
+            await session.commit()
+            await session.refresh(order)
+
+            logger.info("📋 Paper order FILLED: %s %s %.4f %s @ %.4f",
+                        side.upper(), quantity, symbol, "PAPER", price)
+            return order
+
+        except Exception as e:
+            await session.rollback()
+            logger.error("place_paper_order failed: %s", e)
+            return None
 
 
-async def execute_order(session: AsyncSession, order_id: str) -> Optional[Order]:
-    """Instant full fill at order.price; updates fills, order, positions."""
-    o = await session.get(Order, order_id)
-    if not o:
-        return None
-    if o.status not in (OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED):
-        return o
+async def _update_position(
+    session: AsyncSession, order: Order, price: float, qty: float, cid: str
+) -> None:
+    sym  = order.symbol
+    mode = TradingMode.PAPER
 
-    fill_price = float(o.price or 0.0)
-    if fill_price <= 0:
-        tick = market_stream.get_latest_price(o.symbol)
-        fill_price = float(tick["price"]) if tick else 0.0
-    if fill_price <= 0:
-        logger.warning("execute_order: no price for %s", o.symbol)
-        return o
-
-    qty = float(o.quantity)
-    if o.side == OrderSide.SELL:
+    if order.side == OrderSide.BUY:
         res = await session.execute(
             select(Position).where(
-                Position.symbol == o.symbol,
-                Position.exchange == o.exchange,
-                Position.connector_id == o.connector_id,
-                Position.is_open.is_(True),
-                Position.side == OrderSide.BUY,
-                Position.trading_mode == o.trading_mode,
+                Position.symbol == sym, Position.connector_id == cid,
+                Position.is_open.is_(True), Position.side == OrderSide.BUY,
+                Position.trading_mode == mode,
             )
         )
-        pos_chk = res.scalar_one_or_none()
-        if pos_chk is None or pos_chk.quantity + 1e-9 < qty:
-            o.status = OrderStatus.REJECTED
-            await session.flush()
-            return o
-    fill = Fill(
-        id=str(uuid.uuid4()),
-        order_id=o.id,
-        quantity=qty,
-        price=fill_price,
-        commission=0.0,
-        filled_at=datetime.now(timezone.utc),
-    )
-    session.add(fill)
-
-    o.status = OrderStatus.FILLED
-    o.filled_quantity = qty
-    o.avg_fill_price = fill_price
-    o.broker_order_id = f"paper-{o.id[:8]}"
-
-    await _apply_fill_to_positions(session, o, fill_price, qty)
-    await session.flush()
-    return o
-
-
-async def _apply_fill_to_positions(session: AsyncSession, o: Order, price: float, qty: float) -> None:
-    mt = o.market_type
-    mode = o.trading_mode
-
-    if o.side == OrderSide.BUY:
-        q = select(Position).where(
-            Position.symbol == o.symbol,
-            Position.exchange == o.exchange,
-            Position.connector_id == o.connector_id,
-            Position.is_open.is_(True),
-            Position.side == OrderSide.BUY,
-            Position.trading_mode == mode,
-        )
-        res = await session.execute(q)
         pos = res.scalar_one_or_none()
         if pos is None:
             pos = Position(
-                id=str(uuid.uuid4()),
-                symbol=o.symbol,
-                exchange=o.exchange,
-                market_type=mt,
-                side=OrderSide.BUY,
-                quantity=qty,
-                avg_price=price,
-                current_price=price,
-                unrealized_pnl=0.0,
-                realized_pnl=0.0,
-                is_open=True,
-                trading_mode=mode,
-                connector_id=o.connector_id,
+                id=str(uuid.uuid4()), symbol=sym, exchange=order.exchange,
+                market_type=order.market_type, side=OrderSide.BUY,
+                quantity=qty, avg_price=price, current_price=price,
+                unrealized_pnl=0.0, realized_pnl=0.0,
+                is_open=True, trading_mode=mode, connector_id=cid,
+                opened_at=datetime.now(timezone.utc),
             )
             session.add(pos)
         else:
-            nq = pos.quantity + qty
-            pos.avg_price = (pos.quantity * pos.avg_price + qty * price) / nq if nq else price
-            pos.quantity = nq
-            pos.current_price = price
-            pos.unrealized_pnl = (pos.current_price - pos.avg_price) * pos.quantity
-    else:
-        q = select(Position).where(
-            Position.symbol == o.symbol,
-            Position.exchange == o.exchange,
-            Position.connector_id == o.connector_id,
-            Position.is_open.is_(True),
-            Position.side == OrderSide.BUY,
-            Position.trading_mode == mode,
-        )
-        res = await session.execute(q)
-        pos = res.scalar_one_or_none()
-        if pos is None or pos.quantity <= 0:
-            logger.warning("SELL with no long position for %s", o.symbol)
-            return
+            nq = float(pos.quantity) + qty
+            pos.avg_price      = (float(pos.quantity) * float(pos.avg_price) + qty * price) / nq
+            pos.quantity       = nq
+            pos.current_price  = price
+            pos.unrealized_pnl = (price - pos.avg_price) * nq
+            pos.updated_at     = datetime.now(timezone.utc)
 
-        close_qty = min(qty, pos.quantity)
-        pnl = (price - pos.avg_price) * close_qty
-        pos.realized_pnl = float(pos.realized_pnl or 0.0) + pnl
-        pos.quantity -= close_qty
+    else:  # SELL
+        res = await session.execute(
+            select(Position).where(
+                Position.symbol == sym, Position.connector_id == cid,
+                Position.is_open.is_(True), Position.side == OrderSide.BUY,
+                Position.trading_mode == mode,
+            )
+        )
+        pos = res.scalar_one_or_none()
+        if not pos:
+            return
+        close_qty = min(qty, float(pos.quantity))
+        pnl       = (price - float(pos.avg_price)) * close_qty
+        pos.realized_pnl  = float(pos.realized_pnl or 0) + pnl
+        pos.quantity      = float(pos.quantity) - close_qty
         pos.current_price = price
-        if pos.quantity <= 1e-9:
+        if pos.quantity <= 1e-6:
             pos.quantity = 0.0
-            pos.is_open = False
+            pos.is_open  = False
             pos.closed_at = datetime.now(timezone.utc)
         else:
-            pos.unrealized_pnl = (pos.current_price - pos.avg_price) * pos.quantity
-
-
-async def update_positions(session: AsyncSession) -> None:
-    """Mark-to-market open positions using Redis latest prices."""
-    result = await session.execute(select(Position).where(Position.is_open.is_(True)))
-    for pos in result.scalars().all():
-        tick = market_stream.get_latest_price(pos.symbol)
-        if not tick:
-            continue
-        cur = float(tick["price"])
-        pos.current_price = cur
-        if pos.side == OrderSide.BUY:
-            pos.unrealized_pnl = (cur - pos.avg_price) * pos.quantity
-
-
-async def update_balance() -> None:
-    """Reserved: portfolio summary derives cash from positions in existing API."""
-    return None
+            pos.unrealized_pnl = (price - float(pos.avg_price)) * pos.quantity
+        pos.updated_at = datetime.now(timezone.utc)
 
 
 async def execute_pending_signals_async() -> None:
     """
-    Read AI signals from Redis; on action change, place paper trades.
-    Avoids re-trading the same signal repeatedly.
+    Read AI signals from Redis → execute paper trades.
+    Called by the bot loop and the Celery beat scheduler.
     """
-    r = _redis()
+    r = _get_redis()
 
     for sym in market_stream.DEFAULT_SYMBOLS:
-        raw_sig = r.get(SIGNAL_KEY.format(symbol=sym))
+        raw_sig = r.get(AI_SIGNAL_KEY_FMT.format(symbol=sym))
         if not raw_sig:
             continue
         try:
@@ -269,57 +214,52 @@ async def execute_pending_signals_async() -> None:
             continue
 
         action = str(sig.get("action", "hold")).lower()
-        prev = r.get(LAST_ACTION_KEY.format(symbol=sym))
+        prev   = r.get(LAST_ACTION_KEY.format(symbol=sym))
+
+        # Skip if action hasn't changed (avoid re-trading same signal)
         if prev == action:
             continue
-
         if action == "hold":
             r.set(LAST_ACTION_KEY.format(symbol=sym), "hold")
             continue
 
-        if not r.set(LOCK_KEY.format(symbol=sym), "1", nx=True, ex=5):
+        # Lock to prevent concurrent execution for same symbol
+        if not r.set(LOCK_KEY.format(symbol=sym), "1", nx=True, ex=10):
             continue
 
         try:
-            tick = market_stream.get_latest_price(sym)
+            tick  = market_stream.get_latest_price(sym)
             price = float(tick["price"]) if tick else 0.0
             if price <= 0:
                 continue
 
-            async with AsyncSessionLocal() as session:
-                cid = await ensure_paper_connector(session)
+            # Compute quantity: 2% of capital / current price
+            quantity = max(1.0, round(INITIAL_CAPITAL * DEFAULT_QTY_FRAC / price, 4))
+            if sym.endswith("USDT"):
+                quantity = round(INITIAL_CAPITAL * DEFAULT_QTY_FRAC / price, 6)
 
-                if action == "buy":
-                    o = await create_order(
-                        session, cid, sym, "buy", DEFAULT_QTY, price
-                    )
-                else:
-                    res = await session.execute(
-                        select(Position).where(
-                            Position.symbol == sym,
-                            Position.is_open.is_(True),
-                            Position.side == OrderSide.BUY,
-                            Position.trading_mode == TradingMode.PAPER,
-                        )
-                    )
-                    p = res.scalar_one_or_none()
-                    sell_qty = DEFAULT_QTY
-                    if p is not None:
-                        sell_qty = min(DEFAULT_QTY, float(p.quantity))
-                    if sell_qty <= 0:
-                        r.set(LAST_ACTION_KEY.format(symbol=sym), action)
-                        continue
-                    o = await create_order(
-                        session, cid, sym, "sell", sell_qty, price
-                    )
+            order = await place_paper_order(sym, action, quantity, price)
+            if order:
+                r.set(LAST_ACTION_KEY.format(symbol=sym), action)
 
-                await execute_order(session, o.id)
-                await update_positions(session)
-                await session.commit()
-
-            r.set(LAST_ACTION_KEY.format(symbol=sym), action)
-            logger.info("paper trade executed %s %s @ %s", sym, action, price)
         except Exception:
             logger.exception("execute_pending_signals failed for %s", sym)
         finally:
             r.delete(LOCK_KEY.format(symbol=sym))
+
+
+async def mark_to_market_all() -> None:
+    """Update all open position P&L against latest Redis prices."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Position).where(Position.is_open.is_(True))
+        )
+        for pos in result.scalars().all():
+            tick = market_stream.get_latest_price(pos.symbol)
+            if not tick:
+                continue
+            cur = float(tick["price"])
+            pos.current_price  = cur
+            pos.unrealized_pnl = (cur - float(pos.avg_price)) * float(pos.quantity)
+            pos.updated_at     = datetime.now(timezone.utc)
+        await session.commit()
