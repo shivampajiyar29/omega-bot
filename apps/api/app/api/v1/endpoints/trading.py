@@ -99,16 +99,20 @@ async def positions_summary():
 
 @router.get("/signals")
 async def get_current_signals():
-    """Get current AI signals for all symbols."""
+    """Get current AI signals for all symbols from Redis."""
     from app.services.market_stream import DEFAULT_SYMBOLS, _get_redis, AI_SIGNAL_KEY_FMT
     import json
-    r = _get_redis()
-    signals = []
-    for sym in DEFAULT_SYMBOLS:
-        raw = r.get(AI_SIGNAL_KEY_FMT.format(symbol=sym))
-        if raw:
-            try:
-                signals.append(json.loads(raw))
-            except Exception:
-                pass
-    return signals
+    try:
+        r = _get_redis()
+        signals = []
+        for sym in DEFAULT_SYMBOLS:
+            raw = r.get(AI_SIGNAL_KEY_FMT.format(symbol=sym))
+            if raw:
+                try:
+                    signals.append(json.loads(raw))
+                except Exception:
+                    pass
+        return signals
+    except Exception:
+        # Redis not available — return empty (signals appear once market stream starts)
+        return []

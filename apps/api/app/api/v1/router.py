@@ -20,8 +20,8 @@ from app.api.v1.endpoints.indicators   import router as indicators_router
 from app.api.v1.endpoints.ai_signal    import router as ai_signal_router
 from app.api.v1.endpoints.journal      import router as journal_router
 from app.api.v1.endpoints.screener     import router as screener_router
+from app.api.v1.endpoints.trading      import router as trading_router   # ← was missing!
 
-# Stub routers from __init__.py
 from app.api.v1.endpoints import (
     orders as orders_router,
     positions as positions_router,
@@ -52,4 +52,5 @@ api_router.include_router(indicators_router, prefix="/indicators",  tags=["indic
 api_router.include_router(ai_signal_router,  prefix="/ai-signal",   tags=["ai-signal"])
 api_router.include_router(journal_router,    prefix="/journal",     tags=["journal"])
 api_router.include_router(screener_router,   prefix="/screener",    tags=["screener"])
+api_router.include_router(trading_router,    prefix="/trading",     tags=["trading"])   # ← registered
 api_router.include_router(ws_router,         tags=["websocket"])

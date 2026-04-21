@@ -1,16 +1,13 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { 
-  useDashboardSummary, 
-  useBots, 
-  usePositions, 
-  useOrders, 
-  useMarketOverview 
+import { useState, useEffect, useRef } from "react";
+import {
+  useDashboardSummary, useBots, usePositions,
+  useOrders, useMarketOverview, useAISignals,
 } from "@/hooks/useApi";
-import { Loader2, AlertCircle } from "lucide-react";
+import { useMarketFeed } from "@/hooks/useMarketFeed";
 import { useQueryClient } from "@tanstack/react-query";
 
-// ─── Sparkline component ──────────────────────────────────────────────────────
+// ── Sparkline ─────────────────────────────────────────────────────────────────
 function Sparkline({ points, color }: { points: number[]; color: string }) {
   if (!points || points.length < 2) return <div style={{ height: 36 }} />;
   const W = 120, H = 36;
@@ -27,362 +24,297 @@ function Sparkline({ points, color }: { points: number[]; color: string }) {
   );
 }
 
-// ─── Equity canvas ────────────────────────────────────────────────────────────
+// ── Equity Canvas ─────────────────────────────────────────────────────────────
 function EquityCanvas({ points }: { points?: number[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const defaultPts = [100,103,99,105,108,104,110,107,115,112,118,116,122,119,125,123,129,127,132,138,134,140,138,143,141,148];
-  const pts = points && points.length > 1 ? points : defaultPts;
-
+  const pts = points && points.length > 1 ? points : [100,103,99,105,108,104,110,107,115,112,118];
   useEffect(() => {
     const c = ref.current; if (!c) return;
     const ctx = c.getContext("2d"); if (!ctx) return;
-    const W = c.offsetWidth, H = 120;
+    const W = c.offsetWidth || 400, H = 100;
     c.width = W; c.height = H;
     const mn = Math.min(...pts), mx = Math.max(...pts), rng = mx - mn || 1;
     const xs = pts.map((_, i) => i / (pts.length - 1) * W);
     const ys = pts.map(v => H - (v - mn) / rng * (H - 20) - 10);
     const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "rgba(0,212,160,0.2)");
-    g.addColorStop(1, "rgba(0,212,160,0)");
+    g.addColorStop(0, "rgba(0,212,160,0.2)"); g.addColorStop(1, "rgba(0,212,160,0)");
     ctx.beginPath(); ctx.moveTo(xs[0], ys[0]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(xs[i], ys[i]);
+    xs.forEach((x, i) => ctx.lineTo(x, ys[i]));
     ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
     ctx.fillStyle = g; ctx.fill();
     ctx.beginPath(); ctx.moveTo(xs[0], ys[0]);
-    for (let i = 1; i < pts.length; i++) ctx.lineTo(xs[i], ys[i]);
-    ctx.strokeStyle = "var(--green)"; ctx.lineWidth = 2; ctx.stroke();
+    xs.forEach((x, i) => ctx.lineTo(x, ys[i]));
+    ctx.strokeStyle = "#00d4a0"; ctx.lineWidth = 2; ctx.stroke();
     ctx.beginPath(); ctx.arc(xs[xs.length-1], ys[ys.length-1], 4, 0, Math.PI*2);
-    ctx.fillStyle = "var(--green)"; ctx.fill();
+    ctx.fillStyle = "#00d4a0"; ctx.fill();
   }, [pts]);
-
-  return <canvas ref={ref} style={{ width: "100%", height: 120, display: "block" }} />;
+  return <canvas ref={ref} style={{ width: "100%", height: 100, display: "block" }} />;
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const [marketScope, setMarketScope] = useState<"all" | "indian" | "crypto" | "american">("all");
-  const { data: summary, isLoading: subLoading, error: subError } = useDashboardSummary();
-  const { data: bots, isLoading: botsLoading } = useBots();
-  const { data: positions, isLoading: posLoading } = usePositions();
-  const { data: recentOrders, isLoading: ordersLoading } = useOrders({ limit: 10 });
-  const { data: marketData, isLoading: marketLoading } = useMarketOverview(marketScope);
+  const [marketScope, setMarketScope] = useState<"all"|"crypto"|"indian">("crypto");
+
+  const { data: summary }      = useDashboardSummary();
+  const { data: bots = [] }    = useBots();
+  const { data: positions = [] } = usePositions(true);
+  const { data: orders = [] }  = useOrders({ limit: 8 });
+  const { data: market = [] }  = useMarketOverview(marketScope);
+  const { data: aiSignals = [] } = useAISignals();
+
+  // Live price feed
+  const allSyms = ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","RELIANCE","TCS","INFY"];
+  const { prices, connected } = useMarketFeed({ symbols: allSyms });
+
   const qc = useQueryClient();
-  const [syncTimedOut, setSyncTimedOut] = useState(false);
-
-  const [eqTab, setEqTab] = useState<"1D" | "1W" | "1M">("1D");
-
   useEffect(() => {
-    const saved = (localStorage.getItem("omegabot_market_scope") || "").toLowerCase();
-    if (saved === "all" || saved === "indian" || saved === "crypto" || saved === "american") {
-      setMarketScope(saved);
-    } else {
-      setMarketScope("crypto");
-    }
-  }, []);
+    const id = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["positions"] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    }, 5000);
+    return () => clearInterval(id);
+  }, [qc]);
 
-  useEffect(() => {
-    localStorage.setItem("omegabot_market_scope", marketScope);
-  }, [marketScope]);
-
-  const isSyncLoading = subLoading || botsLoading || posLoading || marketLoading || ordersLoading;
-  useEffect(() => {
-    if (!isSyncLoading) {
-      setSyncTimedOut(false);
-      return;
-    }
-    setSyncTimedOut(false);
-    const t = setTimeout(() => setSyncTimedOut(true), 9000);
-    return () => clearTimeout(t);
-  }, [isSyncLoading]);
-
-  const retrySync = () => {
-    setSyncTimedOut(false);
-    qc.invalidateQueries({ queryKey: ["dashboard"] });
-    qc.invalidateQueries({ queryKey: ["bots"] });
-    qc.invalidateQueries({ queryKey: ["positions"] });
-    qc.invalidateQueries({ queryKey: ["orders"] });
-    qc.invalidateQueries({ queryKey: ["market", "overview"] });
-  };
-
-  const totalPnl = summary?.total_pnl_today ?? 0;
-  const portfolioValue = summary?.portfolio_value ?? 0;
-  const activeBotsCount = summary?.active_bots ?? 0;
-  const totalBotsCount = bots?.length ?? 0;
-
-  if (isSyncLoading && !syncTimedOut) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", gap: 12 }}>
-        <Loader2 className="animate-spin" size={32} color="var(--blue)" />
-        <span style={{ fontSize: 13, color: "var(--text3)", fontFamily: "Syne, sans-serif" }}>Synchronizing portfolio data...</span>
-      </div>
-    );
-  }
-
-  if (isSyncLoading && syncTimedOut) {
-    return (
-      <div style={{ background: "rgba(255,179,71,0.06)", border: "1px solid rgba(255,179,71,0.25)", borderRadius: 10, padding: 28, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-        <AlertCircle size={28} color="var(--amber)" />
-        <div style={{ textAlign: "center" }}>
-          <h3 style={{ fontFamily: "Syne, sans-serif", fontSize: 16, marginBottom: 4 }}>Portfolio sync is taking too long</h3>
-          <p style={{ color: "var(--text3)", fontSize: 12 }}>The backend may be down or slow to respond.</p>
-        </div>
-        <button onClick={retrySync} style={{ padding: "8px 14px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text2)", cursor: "pointer", fontFamily: "Syne, sans-serif", fontSize: 12, fontWeight: 650 }}>
-          Retry
-        </button>
-      </div>
-    );
-  }
-
-  if (subError) {
-    return (
-      <div style={{ background: "rgba(255,71,87,0.05)", border: "1px solid rgba(255,71,87,0.2)", borderRadius: 10, padding: 40, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-        <AlertCircle size={32} color="var(--red)" />
-        <div style={{ textAlign: "center" }}>
-          <h3 style={{ fontFamily: "Syne, sans-serif", fontSize: 16, marginBottom: 4 }}>API Connection Error</h3>
-          <p style={{ color: "var(--text3)", fontSize: 12 }}>Unable to reach the OmegaBot backend. Please check your connection.</p>
-        </div>
-        <button onClick={retrySync} style={{ padding: "8px 14px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text2)", cursor: "pointer", fontFamily: "Syne, sans-serif", fontSize: 12, fontWeight: 650 }}>
-          Retry
-        </button>
-      </div>
-    );
-  }
+  const runningBots   = bots.filter((b: any) => b.status === "running").length;
+  const openPositions = Array.isArray(positions) ? positions.length : 0;
+  const unrealizedPnl = Array.isArray(positions)
+    ? positions.reduce((s: number, p: any) => s + (p.unrealized_pnl ?? 0), 0)
+    : (summary as any)?.unrealized_pnl ?? 0;
+  const portfolioVal  = (summary as any)?.portfolio_value ?? 1_000_000;
+  const ordersToday   = (summary as any)?.orders_today ?? orders.length;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-      {/* ── Market overview ticker ─────────────────────────────────────── */}
-      <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 16px" }}>
-        <div style={{ fontSize: 10, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1.2px", marginBottom: 10 }}>
-          Market Overview
+    <div style={{ maxWidth: 1100 }}>
+      {/* Header */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+        <div>
+          <h1 style={{ fontFamily:"Syne,sans-serif", fontSize:22, fontWeight:800 }}>Dashboard</h1>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:4 }}>
+            <span style={{ width:7, height:7, borderRadius:"50%", background: connected ? "var(--green)" : "var(--amber)", display:"inline-block" }}/>
+            <span style={{ fontSize:11, color:"var(--text3)" }}>
+              {connected ? "Live WebSocket" : "Connecting…"} ·{" "}
+              {aiSignals.length} AI signals active
+            </span>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-          {(["crypto", "indian", "american", "all"] as const).map((scope) => (
-            <button
-              key={scope}
-              onClick={() => setMarketScope(scope)}
-              style={{
-                padding: "3px 10px",
-                borderRadius: 5,
-                border: "1px solid var(--border)",
-                background: marketScope === scope ? "var(--bg1)" : "var(--bg3)",
-                color: marketScope === scope ? "var(--text)" : "var(--text3)",
-                fontSize: 10,
-                cursor: "pointer",
-                textTransform: "capitalize",
-              }}
-            >
-              {scope}
+        <div style={{ display:"flex", gap:6 }}>
+          {(["crypto","indian","all"] as const).map(s => (
+            <button key={s} onClick={() => setMarketScope(s)}
+              style={{ padding:"5px 12px", borderRadius:5, border:"none", cursor:"pointer",
+                fontFamily:"Syne,sans-serif", fontSize:11, fontWeight:500,
+                background: marketScope === s ? "var(--bg1)" : "var(--bg3)",
+                color: marketScope === s ? "var(--text)" : "var(--text3)" }}>
+              {s.charAt(0).toUpperCase()+s.slice(1)}
             </button>
           ))}
         </div>
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
-          {Array.isArray(marketData) && marketData.map((t: any) => (
-            <div key={t.sym} style={{ flexShrink: 0, background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 14px", display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 12 }}>{t.sym}</span>
-              <span style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 12 }}>{t.price?.toLocaleString("en-IN")}</span>
-              <span style={{ fontSize: 11, color: (t.pct ?? 0) >= 0 ? "var(--green)" : "var(--red)" }}>
-                {(t.pct ?? 0) >= 0 ? "+" : ""}{(t.pct ?? 0).toFixed(2)}%
-              </span>
-            </div>
-          ))}
-          {(!marketData || marketData.length === 0) && (
-            <div style={{ fontSize: 11, color: "var(--text3)", padding: "8px" }}>No live market data available</div>
-          )}
-        </div>
       </div>
 
-      {/* ── Stat cards ─────────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      {/* KPI Cards */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:16 }}>
         {[
-          { label: "Total P&L (Today)", value: `${totalPnl >= 0 ? "+" : ""}₹${totalPnl.toLocaleString("en-IN")}`, sub: "Today's performance", color: totalPnl >= 0 ? "var(--green)" : "var(--red)", spark: [100,102,101,104,106,105,108,107,110,112] },
-          { label: "Portfolio Value",   value: `₹${portfolioValue.toLocaleString("en-IN")}`, sub: summary?.trading_mode?.toUpperCase() + " account", color: "var(--text)",  spark: [300,305,302,308,312,310,315,318,322,325] },
-          { label: "Active Bots",       value: `${activeBotsCount} / ${totalBotsCount}`, sub: "Live instances", color: "var(--blue)",  spark: [3,3,4,4,3,3,3,4,3,3] },
-          { label: "Alerts",            value: summary?.unread_alerts ?? 0, sub: "Unread notifications", color: "var(--purple)", spark: [0,1,0,2,1,0,3,1,0,0] },
-        ].map(s => (
-          <div key={s.label} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
-            <div style={{ fontSize: 10, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>{s.label}</div>
-            <div style={{ fontFamily: "Syne, sans-serif", fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 4 }}>{s.sub}</div>
-            <div style={{ marginTop: 8 }}><Sparkline points={s.spark} color={s.color === "var(--text)" ? "#8b90a0" : s.color} /></div>
+          { label:"Portfolio Value",  value:`₹${portfolioVal.toLocaleString("en-IN",{maximumFractionDigits:0})}`, color:"var(--text)",  sub:"Paper capital" },
+          { label:"Unrealized P&L",   value:`${unrealizedPnl>=0?"+":""}₹${unrealizedPnl.toLocaleString("en-IN",{maximumFractionDigits:2})}`, color: unrealizedPnl>=0?"var(--green)":"var(--red)", sub:"Open positions" },
+          { label:"Running Bots",     value: runningBots.toString(),  color:"var(--blue)",  sub:`${bots.length} total` },
+          { label:"Open Positions",   value: openPositions.toString(), color:"var(--text)", sub:`${ordersToday} orders today` },
+        ].map((c: any) => (
+          <div key={c.label} style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ fontSize:10, color:"var(--text3)", fontFamily:"Syne,sans-serif", textTransform:"uppercase", letterSpacing:"1px", marginBottom:6 }}>{c.label}</div>
+            <div style={{ fontFamily:"Syne,sans-serif", fontSize:22, fontWeight:700, color:c.color }}>{c.value}</div>
+            <div style={{ fontSize:10, color:"var(--text3)", marginTop:4 }}>{c.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* ── Middle row ─────────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr", gap: 12 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"1.6fr 1fr", gap:14 }}>
 
-        {/* Equity curve */}
-        <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1px" }}>Equity Curve</div>
-            <div style={{ display: "flex", gap: 2 }}>
-              {(["1D","1W","1M"] as const).map(t => (
-                <button key={t} onClick={() => setEqTab(t)} style={{
-                  padding: "3px 10px", borderRadius: 4, border: "1px solid transparent",
-                  cursor: "pointer", fontFamily: "Syne, sans-serif", fontSize: 10, fontWeight: 500,
-                  background: eqTab === t ? "var(--bg1)" : "transparent",
-                  color: eqTab === t ? "var(--text)" : "var(--text3)",
-                  borderColor: eqTab === t ? "var(--border)" : "transparent",
-                }}>{t}</button>
-              ))}
+        {/* LEFT column */}
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+
+          {/* Market Overview */}
+          <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ fontSize:11, color:"var(--text3)", fontFamily:"Syne,sans-serif", textTransform:"uppercase", letterSpacing:"1px", marginBottom:12 }}>
+              Market Overview
             </div>
-          </div>
-          <EquityCanvas />
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6, fontSize: 11 }}>
-            <span style={{ color: "var(--text3)" }}>Baseline</span>
-            <span style={{ color: "var(--green)", fontFamily: "Syne, sans-serif", fontWeight: 600 }}>Real-time projection</span>
-            <span style={{ color: "var(--text3)" }}>₹{portfolioValue.toLocaleString("en-IN")}</span>
-          </div>
-        </div>
-
-        {/* Active bots */}
-        <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1px" }}>Active Bots</div>
-            <a href="/strategy" style={{ fontSize: 10, color: "var(--blue)", textDecoration: "none" }}>+ New</a>
-          </div>
-          {bots && bots.length > 0 ? (
-            bots.map((b: any) => (
-              <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--bg3)", borderRadius: 6, marginBottom: 6, cursor: "pointer" }}>
-                <span style={{
-                  width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                  background: b.status === "running" ? "var(--green)" : b.status === "paused" ? "var(--amber)" : "var(--text3)",
-                  boxShadow: b.status === "running" ? "0 0 6px var(--green)" : "none",
-                }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: "Syne, sans-serif", fontSize: 12, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</div>
-                  <div style={{ fontSize: 10, color: "var(--text3)" }}>{b.symbol} · {b.status}</div>
-                </div>
-                <div style={{ width: 30, height: 17, borderRadius: 9, background: b.status === "running" ? "rgba(0,212,160,0.25)" : "var(--bg2)", position: "relative" }}>
-                   <span style={{ position: "absolute", top: 2, left: b.status === "running" ? 14 : 2, width: 11, height: 11, borderRadius: "50%", background: b.status === "running" ? "var(--green)" : "var(--text3)" }} />
-                </div>
+            {market.length === 0 ? (
+              <div style={{ color:"var(--text3)", fontSize:12, textAlign:"center", padding:16 }}>Loading prices…</div>
+            ) : (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
+                {market.slice(0,6).map((m: any) => {
+                  const livePx = prices[m.symbol];
+                  const px     = livePx ?? m.price ?? 0;
+                  const pct    = m.change_pct ?? m.pct ?? 0;
+                  return (
+                    <div key={m.symbol} style={{ background:"var(--bg3)", borderRadius:8, padding:"10px 12px" }}>
+                      <div style={{ fontSize:10, color:"var(--text3)", fontFamily:"Syne,sans-serif", marginBottom:4 }}>{m.symbol}</div>
+                      <div style={{ fontFamily:"IBM Plex Mono,monospace", fontWeight:700, fontSize:14 }}>
+                        {px > 100 ? px.toLocaleString("en-IN",{maximumFractionDigits:2}) : px.toFixed(4)}
+                      </div>
+                      <div style={{ fontSize:11, marginTop:2, color: pct>=0?"var(--green)":"var(--red)" }}>
+                        {pct>=0?"+":""}{pct.toFixed(2)}%
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))
-          ) : (
-            <div style={{ color: "var(--text3)", fontSize: 11, textAlign: "center", padding: "20px" }}>No active bots</div>
-          )}
-        </div>
-
-        {/* Watchlist (Placeholder for now, same as market overview) */}
-        <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1px" }}>Watchlist</div>
-            <a href="/watchlist" style={{ fontSize: 10, color: "var(--blue)", textDecoration: "none" }}>+ Add</a>
+            )}
           </div>
-          {Array.isArray(marketData) && marketData.slice(0, 5).map((w: any) => (
-            <a key={w.sym} href="/charts" style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid var(--border)", textDecoration: "none" }}>
-              <span style={{ fontFamily: "Syne, sans-serif", fontWeight: 700, fontSize: 12, width: 56, color: "var(--text)" }}>{w.sym}</span>
-              <span style={{ fontSize: 10, color: "var(--text3)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Instrument</span>
-              <span style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 11, color: "var(--text)", minWidth: 68, textAlign: "right" }}>
-                ₹{w.price?.toLocaleString("en-IN")}
-              </span>
-              <span style={{
-                fontSize: 10, minWidth: 50, textAlign: "right", padding: "2px 6px", borderRadius: 4,
-                background: (w.chg ?? 0) >= 0 ? "rgba(0,212,160,0.1)" : "rgba(255,71,87,0.1)",
-                color: (w.chg ?? 0) >= 0 ? "var(--green)" : "var(--red)",
-              }}>
-                {(w.chg ?? 0) >= 0 ? "+" : ""}{(w.chg ?? 0).toFixed(2)}%
-              </span>
-            </a>
-          ))}
-        </div>
-      </div>
 
-      {/* ── Bottom row ─────────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: 12 }}>
-
-        {/* Positions */}
-        <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1px" }}>Open Positions</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 10, padding: "2px 8px", background: "rgba(0,212,160,0.1)", color: "var(--green)", border: "1px solid rgba(0,212,160,0.2)", borderRadius: 4, fontFamily: "Syne, sans-serif", fontWeight: 500 }}>
-                {positions?.length ?? 0} open
-              </span>
-              <a href="/positions" style={{ fontSize: 10, color: "var(--blue)", textDecoration: "none" }}>View all →</a>
+          {/* Open Positions */}
+          <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"var(--text3)", fontFamily:"Syne,sans-serif", textTransform:"uppercase", letterSpacing:"1px" }}>
+                Open Positions ({openPositions})
+              </div>
+              <a href="/positions" style={{ fontSize:11, color:"var(--blue)", textDecoration:"none" }}>View all →</a>
             </div>
-          </div>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                {["Symbol","Side","Qty","Avg","LTP","P&L"].map(h => (
-                  <th key={h} style={{ fontSize: 10, color: "var(--text3)", fontFamily: "Syne, sans-serif", fontWeight: 500, textTransform: "uppercase", letterSpacing: "1px", padding: "4px 8px", textAlign: "left", borderBottom: "1px solid var(--border)" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {positions && positions.length > 0 ? (
-                positions.map((p: any) => (
-                  <tr key={p.id} style={{ cursor: "pointer" }}>
-                    <td style={{ padding: "9px 8px", fontFamily: "Syne, sans-serif", fontWeight: 600, fontSize: 12 }}>{p.symbol}</td>
-                    <td style={{ padding: "9px 8px" }}>
-                      <span style={{ fontSize: 10, fontFamily: "Syne, sans-serif", fontWeight: 600, padding: "2px 7px", borderRadius: 4, background: p.side === "buy" ? "rgba(0,212,160,0.1)" : "rgba(255,71,87,0.1)", color: p.side === "buy" ? "var(--green)" : "var(--red)" }}>
-                        {p.side.toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={{ padding: "9px 8px", fontSize: 12, color: "var(--text2)" }}>{p.quantity}</td>
-                    <td style={{ padding: "9px 8px", fontFamily: "IBM Plex Mono, monospace", fontSize: 11, color: "var(--text3)" }}>₹{p.avg_price?.toLocaleString("en-IN")}</td>
-                    <td style={{ padding: "9px 8px", fontFamily: "IBM Plex Mono, monospace", fontSize: 11 }}>₹{p.current_price?.toLocaleString("en-IN")}</td>
-                    <td style={{ padding: "9px 8px", fontFamily: "Syne, sans-serif", fontWeight: 600, fontSize: 12, color: (p.unrealized_pnl ?? 0) >= 0 ? "var(--green)" : "var(--red)" }}>
-                      {(p.unrealized_pnl ?? 0) >= 0 ? "+" : ""}₹{(p.unrealized_pnl ?? 0).toLocaleString("en-IN")}
-                    </td>
+            {openPositions === 0 ? (
+              <div style={{ color:"var(--text3)", fontSize:12, textAlign:"center", padding:"16px 0" }}>
+                No open positions · <a href="/trading" style={{ color:"var(--blue)" }}>Start trading →</a>
+              </div>
+            ) : (
+              <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                <thead>
+                  <tr>
+                    {["Symbol","Side","Qty","Avg Price","Live Price","P&L"].map(h => (
+                      <th key={h} style={{ fontSize:10, color:"var(--text3)", fontFamily:"Syne,sans-serif", textAlign:"left", padding:"4px 8px", borderBottom:"1px solid var(--border)", fontWeight:500 }}>{h}</th>
+                    ))}
                   </tr>
-                ))
-              ) : (
-                <tr><td colSpan={6} style={{ textAlign: "center", padding: "20px", fontSize: 11, color: "var(--text3)" }}>No open positions</td></tr>
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {(Array.isArray(positions) ? positions : []).slice(0,6).map((p: any) => {
+                    const livePx = prices[p.symbol] ?? p.current_price ?? p.avg_price;
+                    const unr    = (livePx - p.avg_price) * p.quantity;
+                    return (
+                      <tr key={p.id}>
+                        <td style={{ padding:"8px", fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:13 }}>{p.symbol}</td>
+                        <td style={{ padding:"8px" }}>
+                          <span style={{ padding:"2px 8px", borderRadius:4, fontFamily:"Syne,sans-serif", fontSize:10, fontWeight:600,
+                            background: p.side==="buy"?"rgba(0,212,160,0.1)":"rgba(255,71,87,0.1)",
+                            color: p.side==="buy"?"var(--green)":"var(--red)" }}>
+                            {p.side?.toUpperCase()}
+                          </span>
+                        </td>
+                        <td style={{ padding:"8px", fontFamily:"IBM Plex Mono,monospace", fontSize:12 }}>{p.quantity}</td>
+                        <td style={{ padding:"8px", fontFamily:"IBM Plex Mono,monospace", fontSize:12 }}>{Number(p.avg_price).toFixed(2)}</td>
+                        <td style={{ padding:"8px", fontFamily:"IBM Plex Mono,monospace", fontSize:12, color:"var(--green)" }}>{Number(livePx).toFixed(2)}</td>
+                        <td style={{ padding:"8px", fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:12, color: unr>=0?"var(--green)":"var(--red)" }}>
+                          {unr>=0?"+":""}₹{unr.toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Recent Orders */}
+          <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"var(--text3)", fontFamily:"Syne,sans-serif", textTransform:"uppercase", letterSpacing:"1px" }}>
+                Recent Orders
+              </div>
+              <a href="/orders" style={{ fontSize:11, color:"var(--blue)", textDecoration:"none" }}>View all →</a>
+            </div>
+            {orders.length === 0 ? (
+              <div style={{ color:"var(--text3)", fontSize:12, textAlign:"center", padding:"16px 0" }}>No orders yet</div>
+            ) : orders.slice(0,6).map((o: any) => (
+              <div key={o.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
+                <span style={{ padding:"2px 8px", borderRadius:4, fontFamily:"Syne,sans-serif", fontWeight:600, fontSize:10,
+                  background: o.side==="buy"?"rgba(0,212,160,0.1)":"rgba(255,71,87,0.1)",
+                  color: o.side==="buy"?"var(--green)":"var(--red)" }}>
+                  {o.side?.toUpperCase()}
+                </span>
+                <span style={{ fontFamily:"Syne,sans-serif", fontWeight:600, fontSize:12, flex:1 }}>{o.symbol}</span>
+                <span style={{ fontSize:11, color:"var(--text3)" }}>{o.filled_quantity ?? o.quantity}</span>
+                <span style={{ fontFamily:"IBM Plex Mono,monospace", fontSize:11 }}>
+                  @{(o.avg_fill_price ?? o.price ?? 0).toFixed(2)}
+                </span>
+                <span style={{ fontSize:10, padding:"2px 6px", borderRadius:4, background:"var(--bg3)",
+                  color: o.status==="filled"?"var(--green)":"var(--text3)" }}>
+                  {o.status}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Risk + Logs (Logs replaced with Recent Orders for now) */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* RIGHT column */}
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
 
-          {/* Risk meters (Static for now, but configured with summary) */}
-          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1px" }}>Risk Center</div>
-              <a href="/risk" style={{ fontSize: 10, color: "var(--blue)", textDecoration: "none" }}>Configure →</a>
+          {/* Bot Status */}
+          <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"var(--text3)", fontFamily:"Syne,sans-serif", textTransform:"uppercase", letterSpacing:"1px" }}>
+                Bots ({bots.length})
+              </div>
+              <a href="/trading" style={{ fontSize:11, color:"var(--blue)", textDecoration:"none" }}>Manage →</a>
             </div>
-            {[
-              { label: "Daily Loss", val: Math.min(100, (Math.abs(summary?.total_pnl_today ?? 0) / 10000) * 100), color: "var(--green)" },
-              { label: "Margin Used", val: 42, color: "var(--amber)" },
-              { label: "Positions",  val: Math.min(100, ((summary?.open_positions ?? 0) / 10) * 100), color: "var(--blue)" },
-            ].map(r => (
-              <div key={r.label} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 }}>
-                  <span style={{ color: "var(--text2)" }}>{r.label}</span>
-                  <span style={{ color: "var(--text3)", fontSize: 10 }}>{r.val.toFixed(0)}%</span>
-                </div>
-                <div style={{ height: 5, background: "var(--bg3)", borderRadius: 3, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${r.val}%`, background: r.color, borderRadius: 3, transition: "width 1s ease" }} />
-                </div>
+            {bots.length === 0 ? (
+              <div style={{ color:"var(--text3)", fontSize:12, textAlign:"center", padding:"16px 0" }}>
+                No bots · <a href="/strategy" style={{ color:"var(--blue)" }}>Create one →</a>
+              </div>
+            ) : bots.slice(0,5).map((b: any) => (
+              <div key={b.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
+                <span style={{ width:8, height:8, borderRadius:"50%", flexShrink:0,
+                  background: b.status==="running"?"var(--green)":b.status==="paused"?"var(--amber)":"var(--text3)" }}/>
+                <span style={{ fontFamily:"Syne,sans-serif", fontWeight:600, fontSize:12, flex:1 }}>{b.name}</span>
+                <span style={{ fontSize:10, color:"var(--text3)" }}>{b.symbol}</span>
+                <span style={{ fontSize:10, padding:"2px 6px", borderRadius:4, background:"var(--bg3)", color:"var(--text3)" }}>
+                  {b.status}
+                </span>
               </div>
             ))}
           </div>
 
-          {/* Recent Orders (Replacing mock logs) */}
-          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: "14px 16px", flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, color: "var(--text3)", fontFamily: "Syne, sans-serif", textTransform: "uppercase", letterSpacing: "1px" }}>Recent Orders</div>
-              <a href="/orders" style={{ fontSize: 10, color: "var(--blue)", textDecoration: "none" }}>View all →</a>
+          {/* AI Signals */}
+          <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+              <div style={{ fontSize:11, color:"var(--text3)", fontFamily:"Syne,sans-serif", textTransform:"uppercase", letterSpacing:"1px" }}>
+                AI Signals
+              </div>
+              <a href="/screener" style={{ fontSize:11, color:"var(--blue)", textDecoration:"none" }}>Screener →</a>
             </div>
-            {recentOrders && recentOrders.length > 0 ? (
-              recentOrders.slice(0, 4).map((o: any) => (
-                <div key={o.id} style={{
-                  padding: "7px 10px", marginBottom: 5, borderRadius: "0 4px 4px 0",
-                  background: "var(--bg3)", fontSize: 11, color: "var(--text2)",
-                  borderLeft: `2px solid ${o.side === "buy" ? "var(--green)" : "var(--red)"}`,
-                }}>
-                  <span style={{ color: "var(--text3)", fontSize: 10, marginRight: 8 }}>{o.status.toUpperCase()}</span>
-                  {o.side.toUpperCase()} {o.quantity} {o.symbol} @ {o.price ?? "MKT"}
-                </div>
-              ))
-            ) : (
-              <div style={{ color: "var(--text3)", fontSize: 11, textAlign: "center", padding: "20px" }}>No recent orders</div>
-            )}
+            {aiSignals.length === 0 ? (
+              <div style={{ color:"var(--text3)", fontSize:12, textAlign:"center", padding:"16px 0" }}>
+                No signals yet. Start a bot to generate signals.
+              </div>
+            ) : aiSignals.slice(0,6).map((sig: any) => (
+              <div key={sig.symbol} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 0", borderBottom:"1px solid var(--border)" }}>
+                <span style={{ fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:12, width:72, flexShrink:0 }}>{sig.symbol}</span>
+                <span style={{ padding:"2px 8px", borderRadius:4, fontFamily:"Syne,sans-serif", fontWeight:700, fontSize:10,
+                  background: sig.action==="buy"?"rgba(0,212,160,0.1)":sig.action==="sell"?"rgba(255,71,87,0.1)":"rgba(255,179,71,0.08)",
+                  color: sig.action==="buy"?"var(--green)":sig.action==="sell"?"var(--red)":"var(--amber)" }}>
+                  {sig.action?.toUpperCase()}
+                </span>
+                <span style={{ flex:1, fontSize:10, color:"var(--text3)" }}>{(sig.confidence*100).toFixed(0)}%</span>
+                <span style={{ fontSize:9, color:"var(--text3)" }}>{sig.source}</span>
+              </div>
+            ))}
           </div>
+
+          {/* Quick actions */}
+          <div style={{ background:"var(--bg2)", border:"1px solid var(--border)", borderRadius:10, padding:"14px 16px" }}>
+            <div style={{ fontSize:11, color:"var(--text3)", fontFamily:"Syne,sans-serif", textTransform:"uppercase", letterSpacing:"1px", marginBottom:12 }}>
+              Quick Actions
+            </div>
+            {[
+              { label:"▶ Paper Trade",   href:"/trading",   color:"var(--green)" },
+              { label:"📊 Backtest",      href:"/backtest",  color:"var(--blue)" },
+              { label:"🔍 Screener",      href:"/screener",  color:"var(--amber)" },
+              { label:"⚡ New Strategy",  href:"/strategy",  color:"var(--text)" },
+            ].map(a => (
+              <a key={a.href} href={a.href}
+                style={{ display:"flex", alignItems:"center", padding:"9px 12px", borderRadius:7, marginBottom:6,
+                  background:"var(--bg3)", textDecoration:"none", color:a.color,
+                  fontFamily:"Syne,sans-serif", fontWeight:600, fontSize:12, border:"1px solid var(--border)" }}>
+                {a.label}
+              </a>
+            ))}
+          </div>
+
         </div>
       </div>
     </div>

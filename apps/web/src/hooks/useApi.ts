@@ -372,3 +372,43 @@ export function useClosePosition() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["positions"] }),
   });
 }
+
+// ─── Trading (Paper + Live — Real API) ───────────────────────────────────────
+
+export function usePlaceOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.placeOrder,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["positions"] });
+      qc.invalidateQueries({ queryKey: ["portfolio"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+}
+
+export function useTradingPositions() {
+  return useQuery({
+    queryKey: ["trading", "positions"],
+    queryFn: api.getTradingPositions,
+    refetchInterval: 2_000,
+  });
+}
+
+export function useAISignals() {
+  return useQuery({
+    queryKey: ["trading", "signals"],
+    queryFn: api.getAISignals,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useQuickAISignal(symbol: string, enabled = true) {
+  return useQuery({
+    queryKey: ["ai-signal", "quick", symbol],
+    queryFn: () => api.getQuickAISignal(symbol),
+    enabled: enabled && !!symbol,
+    refetchInterval: 15_000,
+  });
+}

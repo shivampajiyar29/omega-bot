@@ -288,3 +288,67 @@ export const generateIndicator = (description: string, params?: Record<string, u
 export const closePosition = (id: string) => api.post(`/positions/${id}/close`).then((r) => r.data);
 export const getQuote = (symbol: string, exchange = "NSE") =>
   api.get(`/marketdata/quote/${symbol}`, { params: { exchange } }).then((r) => r.data);
+
+// ─── Trading (Paper + Live) ───────────────────────────────────────────────────
+
+export interface TradeRequest {
+  symbol: string;
+  side: "buy" | "sell";
+  quantity: number;
+  price?: number;
+  order_type?: string;
+}
+
+export interface TradeResult {
+  success: boolean;
+  order_id?: string;
+  symbol?: string;
+  side?: string;
+  quantity?: number;
+  fill_price?: number;
+  status?: string;
+  message?: string;
+  error?: string;
+}
+
+export interface PositionSummary {
+  positions: Array<{
+    symbol: string;
+    side: string;
+    quantity: number;
+    avg_price: number;
+    current_price: number;
+    unrealized_pnl: number;
+    realized_pnl: number;
+    pnl_pct: number;
+    trading_mode: string;
+  }>;
+  total_unrealized: number;
+  total_invested: number;
+  open_count: number;
+}
+
+export interface AISignalData {
+  symbol: string;
+  action: "buy" | "sell" | "hold";
+  confidence: number;
+  reasoning: string;
+  source: string;
+  price?: number;
+}
+
+// Place a manual paper trade
+export const placeOrder = (data: TradeRequest) =>
+  api.post<TradeResult>("/trading/execute", data).then((r) => r.data);
+
+// Get live positions with mark-to-market P&L
+export const getTradingPositions = () =>
+  api.get<PositionSummary>("/trading/positions/summary").then((r) => r.data);
+
+// Get current AI signals from Redis
+export const getAISignals = () =>
+  api.get<AISignalData[]>("/trading/signals").then((r) => r.data);
+
+// Get AI signal for specific symbol (quick)
+export const getQuickAISignal = (symbol: string, exchange = "NSE") =>
+  api.get(`/ai-signal/quick/${symbol}`, { params: { exchange } }).then((r) => r.data);

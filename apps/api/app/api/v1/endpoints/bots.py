@@ -1,15 +1,17 @@
 """
 Bots API — create, start, stop, and monitor trading bots.
-Bots are wired to the execution engine and paper trading loop.
+Each bot runs a real paper trading loop using live market prices and AI signals.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
+import json
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +21,7 @@ from app.models.models import Bot, BotStatus, Strategy, BrokerConnector
 
 router = APIRouter()
 
-# Running bot tasks: bot_id → asyncio.Task
+# bot_id → running asyncio Task
 _bot_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -46,27 +48,22 @@ async def create_bot(data: BotCreate, db: AsyncSession = Depends(get_db)):
     if not strat:
         raise HTTPException(404, "Strategy not found")
 
-    # Get or use default connector
     conn_id = data.connector_id
     if not conn_id:
-        result = await db.execute(
-            select(BrokerConnector).where(BrokerConnector.is_default.is_(True)).limit(1)
-        )
-        conn = result.scalar_one_or_none()
+        res  = await db.execute(select(BrokerConnector).where(BrokerConnector.is_default.is_(True)).limit(1))
+        conn = res.scalar_one_or_none()
         if not conn:
-            result2 = await db.execute(select(BrokerConnector).limit(1))
-            conn = result2.scalar_one_or_none()
+            res2  = await db.execute(select(BrokerConnector).limit(1))
+            conn  = res2.scalar_one_or_none()
         if conn:
             conn_id = conn.id
         else:
-            # Auto-create mock connector
             conn = BrokerConnector(
                 id=str(uuid.uuid4()), name="mock",
-                display_name="Mock Paper",
+                display_name="Paper Trading",
                 adapter_class="app.adapters.broker.mock_broker.MockBrokerAdapter",
-                enabled=True, is_default=True,
-                status="connected",
-                trading_mode="paper", market_types=["equity","crypto"],
+                enabled=True, is_default=True, status="connected",
+                trading_mode="paper", market_types=["equity", "crypto"],
             )
             db.add(conn)
             await db.flush()
@@ -104,7 +101,7 @@ async def get_bot(bot_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{bot_id}/start")
-async def start_bot(bot_id: str, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def start_bot(bot_id: str, db: AsyncSession = Depends(get_db)):
     bot = await db.get(Bot, bot_id)
     if not bot:
         raise HTTPException(404, "Bot not found")
@@ -113,22 +110,23 @@ async def start_bot(bot_id: str, background_tasks: BackgroundTasks, db: AsyncSes
     if not strat:
         raise HTTPException(404, "Strategy not found")
 
-    bot.status     = BotStatus.RUNNING
-    bot.started_at = datetime.utcnow()
-    await db.commit()
-
-    # Cancel existing task if any
+    # Cancel existing task
     old = _bot_tasks.pop(bot_id, None)
     if old and not old.done():
         old.cancel()
 
-    # Start live paper trading loop in background
+    bot.status     = BotStatus.RUNNING
+    bot.started_at = datetime.utcnow()
+    await db.commit()
+
+    # Launch real paper trading loop
     task = asyncio.create_task(
         _run_bot_loop(bot_id, bot.symbol, strat.dsl or {})
     )
     _bot_tasks[bot_id] = task
 
-    return {"status": "started", "bot_id": bot_id, "message": f"Bot running paper trades on {bot.symbol}"}
+    return {"status": "started", "bot_id": bot_id,
+            "message": f"Bot running paper trades on {bot.symbol}"}
 
 
 @router.post("/{bot_id}/stop")
@@ -159,14 +157,14 @@ async def pause_bot(bot_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/kill-all")
 async def kill_all_bots(db: AsyncSession = Depends(get_db)):
-    # Cancel all tasks
     for task in list(_bot_tasks.values()):
         if not task.done():
             task.cancel()
     _bot_tasks.clear()
 
-    # Update DB
-    rows = (await db.execute(select(Bot).where(Bot.status == BotStatus.RUNNING))).scalars().all()
+    rows = (await db.execute(
+        select(Bot).where(Bot.status == BotStatus.RUNNING)
+    )).scalars().all()
     for b in rows:
         b.status     = BotStatus.STOPPED
         b.stopped_at = datetime.utcnow()
@@ -187,49 +185,60 @@ async def delete_bot(bot_id: str, db: AsyncSession = Depends(get_db)):
     return {"deleted": True}
 
 
-# ── Live Bot Loop ─────────────────────────────────────────────────────────────
+# ── Real Bot Loop ─────────────────────────────────────────────────────────────
 
 async def _run_bot_loop(bot_id: str, symbol: str, strategy_dsl: dict) -> None:
     """
-    Continuous loop: get AI signal → execute paper trade → wait.
-    Runs as an asyncio task until cancelled.
+    Real paper trading loop:
+      1. Get live closes from Redis
+      2. Get AI signal (Gemini → rule-based fallback)
+      3. Store signal in Redis
+      4. Execute paper trade via paper_trading service
+      5. Sleep 10s, repeat
     """
     from app.services import market_stream
     from app.services.ai_strategy import get_ai_signal
+    from app.services.paper_trading import execute_pending_signals_async
     from app.core.database import AsyncSessionLocal
-    import logging
+    from app.models.models import Bot
 
     log = logging.getLogger(f"bot.{bot_id[:8]}")
-    log.info("Bot loop started for %s", symbol)
+    log.info("Bot loop STARTED — symbol=%s", symbol)
 
+    cycle = 0
     while True:
         try:
-            # 1. Get latest closes
+            # 1. Get closes
             closes = await asyncio.to_thread(market_stream.get_last_closes, symbol, 30)
 
             if len(closes) >= 5:
-                # 2. Get AI signal (Gemini or rule-based)
+                # 2. Generate AI signal
                 sig = await get_ai_signal(symbol, closes)
-                log.info("Signal %s → %s (%.0f%% conf)",
-                         symbol, sig["action"], sig["confidence"] * 100)
+                log.info("Signal %s → %s (%.0f%% conf, src=%s)",
+                         symbol, sig["action"].upper(),
+                         sig["confidence"] * 100, sig["source"])
 
-                # 3. Store signal in Redis so paper_trading can pick up
-                from app.services.market_stream import _get_redis, AI_SIGNAL_KEY_FMT
-                import json
-                _get_redis().set(
-                    AI_SIGNAL_KEY_FMT.format(symbol=symbol.upper()),
-                    json.dumps(sig), ex=60
+                # 3. Store in Redis
+                r = await asyncio.to_thread(market_stream._get_redis)
+                await asyncio.to_thread(
+                    r.set,
+                    market_stream.AI_SIGNAL_KEY_FMT.format(symbol=symbol.upper()),
+                    json.dumps({**sig, "symbol": symbol.upper()}),
+                    "EX", 120
                 )
 
-                # 4. Execute paper trade if signal changed
-                await asyncio.to_thread(_sync_execute_signals)
+                # 4. Execute paper trade from signal
+                await execute_pending_signals_async()
 
-            # 5. Check bot is still running
-            async with AsyncSessionLocal() as db:
-                bot = await db.get(__import__("app.models.models", fromlist=["Bot"]).Bot, bot_id)
-                if not bot or str(bot.status) not in ("running", "BotStatus.RUNNING"):
-                    log.info("Bot %s stopped/paused — exiting loop", bot_id)
-                    break
+            # 5. Check bot still running in DB every 5 cycles
+            if cycle % 5 == 0:
+                async with AsyncSessionLocal() as db:
+                    bot = await db.get(Bot, bot_id)
+                    if not bot or str(bot.status).lower() not in ("running", "botstatus.running"):
+                        log.info("Bot %s stopped/paused → exiting loop", bot_id)
+                        break
+
+            cycle += 1
 
         except asyncio.CancelledError:
             log.info("Bot %s task cancelled", bot_id)
@@ -237,21 +246,9 @@ async def _run_bot_loop(bot_id: str, symbol: str, strategy_dsl: dict) -> None:
         except Exception as e:
             log.error("Bot loop error: %s", e)
 
-        await asyncio.sleep(10)   # Run signal check every 10 seconds
+        await asyncio.sleep(10)
 
-
-def _sync_execute_signals():
-    """Sync wrapper for paper trading signal execution."""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(
-                __import__("app.services.paper_trading", fromlist=["execute_pending_signals_async"])
-                .execute_pending_signals_async()
-            )
-    except Exception:
-        pass
+    log.info("Bot loop ENDED — symbol=%s", symbol)
 
 
 def _b(bot: Bot) -> dict:
